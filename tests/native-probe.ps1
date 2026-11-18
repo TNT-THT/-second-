@@ -79,7 +79,9 @@ public static class DeskProbe {
    if(!until(()=>FindWindow("#32768",null)!=IntPtr.Zero,2500)){why+="nomenu;";wait(400);continue;}
    if(!invokeMenu("投喂")){why+="noitem;";SendKeys.SendWait("{ESC}");wait(400);continue;}
    IntPtr dialog=IntPtr.Zero;if(!until(()=>(dialog=FindWindow("#32770",null))!=IntPtr.Zero,9000)){why+="nodlg;";wait(500);continue;}
-   if(!setFileName(dialog,file)){why+="noedit["+g_dump+"];";PostMessage(dialog,0x10,IntPtr.Zero,IntPtr.Zero);wait(500);continue;}
+   wait(1200);bool ok=false;for(int k=0;k<12&&!ok;k++){ok=setFileName(dialog,file);if(!ok)wait(350);}
+   if(!ok){IntPtr f=edit(dialog);if(f!=IntPtr.Zero){SendMessage(f,0x0c,IntPtr.Zero,file);ok=true;}}
+   if(!ok){why+="noedit["+g_dump+"];";PostMessage(dialog,0x10,IntPtr.Zero,IntPtr.Zero);wait(500);continue;}
    wait(250);PostMessage(dialog,0x111,(IntPtr)1,IntPtr.Zero);
    check(until(()=>FindWindow("#32770",null)==IntPtr.Zero,6000),"picker did not accept the whitelisted path");return;
   }
