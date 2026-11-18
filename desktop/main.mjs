@@ -22,14 +22,20 @@ import {
   restoreState,
   formatBytes,
 } from '../core/state.mjs';
-import { advance, confine, destination } from '../core/motion.mjs';
-import { shouldIgnore, MASK_W, MASK_H } from '../core/hit-test.mjs';
+import {
+  Wander,
+  STILL,
+  actorSize,
+  resizeAnchored,
+  confine,
+  contains,
+} from '../core/motion.mjs';
 import { feedOne, within } from './food.mjs';
 
 const BASE = fileURLToPath(new URL('../', import.meta.url)),
   DIST = path.join(BASE, 'dist');
 const HOME = 'petdesk://app/index.html',
-  REPO = 'https://github.com/TNT-THT/-second-/releases/tag/petdesk-v1.0.0';
+  REPO = 'https://github.com/TNT-THT/-second-/releases/tag/petdesk-v1.1.0';
 const CSP =
   "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data:; media-src 'self' blob:; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'";
 const mime = {
@@ -64,16 +70,13 @@ let studio = null,
   feedBusy = false,
   menuOpen = false,
   hover = false;
-let target = null,
-  precise = null,
+let wander = null,
   drag = null,
-  waitUntil = 0,
   lastTick = 0,
-  walking = false,
   loop,
   tray = null,
-  mask = null,
-  ignoring = true;
+  motion = { ...STILL },
+  motionKey = '';
 const userFile = () => path.join(app.getPath('userData'), 'studio-v1.json');
 function persist() {
   clearTimeout(saveTimer);
@@ -85,7 +88,7 @@ function persist() {
     console.error('PetDesk: cannot save preferences:', e.code);
   }
 }
-const snap = () => ({ state, petOpen: !!pet && !pet.isDestroyed() });
+const snap = () => ({ state, petOpen: !!pet && !pet.isDestroyed(), motion });
 function emit() {
   refreshTray();
   for (const w of [studio, pet])
@@ -159,32 +162,39 @@ function showStudio(page) {
     if (page) studio.webContents.send('petdesk:page', page);
   }
 }
-function petSize() {
-  return [
-    Math.round(218 * Math.max(1, state.prefs.scale)),
-    Math.round(52 + 194 * state.prefs.scale),
-  ];
-}
 function move(p) {
   pet?.setPosition(Math.round(p.x), Math.round(p.y), false);
+}
+function sendPose(next) {
+  motion = next;
+  const key = [
+    next.kind,
+    next.face,
+    next.moving,
+    next.surface,
+    Math.floor(next.phase * 48),
+  ].join(':');
+  if (key !== motionKey && pet && !pet.isDestroyed()) {
+    motionKey = key;
+    pet.webContents.send('petdesk:motion', next);
+  }
 }
 function placeBack() {
   if (!pet) return;
   const b = pet.getBounds(),
-    a = screen.getDisplayMatching(b).workArea;
-  move(confine(b.x, b.y, a, b.width, b.height));
-  resetMotion(1300);
+    area = screen.getDisplayMatching(b).workArea,
+    size = actorSize(state.prefs.scale, area);
+  const wanted = resizeAnchored(b, size, area, wander?.surface);
+  const pos = wander.place(wanted, area, size, {
+    wait: 0.75,
+    surface: wander.surface,
+  });
+  pet.setBounds({ ...pos, ...size }, false);
+  sendPose(wander.track());
 }
-function setWalking(on) {
-  if (walking === on) return;
-  walking = on;
-  pet?.webContents.send('petdesk:motion', { walking: on });
-}
-function resetMotion(delay = 1500) {
-  waitUntil = Date.now() + delay;
-  target = null;
-  precise = null;
-  setWalking(false);
+function resetMotion(delay = 1200) {
+  wander?.stop(delay / 1000);
+  if (wander) sendPose(wander.track());
 }
 function openPet() {
   if (pet) {
@@ -194,7 +204,7 @@ function openPet() {
   const a = screen.getDisplayMatching(
       studio?.getBounds() ?? screen.getPrimaryDisplay().workArea,
     ).workArea,
-    [width, height] = petSize();
+    { width, height } = actorSize(state.prefs.scale, a);
   const p = confine(
     a.x + a.width * 0.7,
     a.y + a.height - height,
@@ -218,9 +228,12 @@ function openPet() {
     icon: path.join(DIST, 'art/icon.png'),
     webPreferences: { ...webPreferences, backgroundThrottling: false },
   });
-  mask = null;
-  ignoring = true;
-  pet.setIgnoreMouseEvents(true);
+  // No cursor polling to turn hit-testing on/off. The compact actor window ALWAYS receives
+  // mouse and file drops; outside this rectangle the underlying desktop remains untouched.
+  pet.setIgnoreMouseEvents(false);
+  wander = new Wander(p, a, { width, height }, { wait: 3, surface: 'floor' });
+  motionKey = '';
+  motion = wander.track();
   if (process.platform === 'darwin')
     pet.setVisibleOnAllWorkspaces(true, {
       visibleOnFullScreen: true,
@@ -236,7 +249,9 @@ function openPet() {
     hover = false;
     menuOpen = false;
     clearInterval(loop);
-    resetMotion();
+    wander = null;
+    motion = { ...STILL };
+    motionKey = '';
     emit();
   });
   void pet.loadURL(HOME + '#pet');
@@ -245,57 +260,62 @@ function openPet() {
   loop = setInterval(tick, 33);
   emit();
 }
+function settleDrag() {
+  if (!drag || !pet || !wander) return;
+  const d = drag;
+  drag = null;
+  const cursor = screen.getCursorScreenPoint(),
+    b = pet.getBounds();
+  const moved = d.moved || Math.hypot(cursor.x - d.sx, cursor.y - d.sy) >= 4;
+  // Sample the release too: a short flick can begin and end between two motion ticks.
+  const a = (
+    moved ? screen.getDisplayNearestPoint(cursor) : screen.getDisplayMatching(b)
+  ).workArea;
+  const size = actorSize(state.prefs.scale, a),
+    target = moved ? { x: cursor.x - d.dx, y: cursor.y - d.dy } : b;
+  const pos = wander.place(target, a, size, {
+    wait: 1.2,
+    snap: moved && state.prefs.edges,
+    surface: !state.prefs.edges ? 'floor' : undefined,
+  });
+  pet.setBounds({ ...pos, ...size }, false);
+  sendPose(wander.track());
+}
 function tick() {
-  if (!pet || pet.isDestroyed()) return;
+  if (!pet || pet.isDestroyed() || !wander) return;
   const now = Date.now(),
     dt = (now - lastTick) / 1000;
   lastTick = now;
-  const b = pet.getBounds();
-  if (state.prefs.passThrough) drag = null;
-  const ignore =
-    state.prefs.passThrough ||
-    shouldIgnore(mask, b, screen.getCursorScreenPoint(), false, !!drag);
-  if (ignore !== ignoring) {
-    pet.setIgnoreMouseEvents(ignore);
-    ignoring = ignore;
-  }
-  hover = !ignore && !drag;
+  const b = pet.getBounds(),
+    cursor = screen.getCursorScreenPoint();
+  hover = contains(b, cursor);
   if (drag) {
-    if (now - drag.t > 45000) {
-      drag = null;
-      resetMotion();
+    if (now - drag.t > 60000) {
+      settleDrag();
       return;
     }
-    const c = screen.getCursorScreenPoint(),
-      a = screen.getDisplayNearestPoint(c).workArea;
-    move(confine(c.x - drag.dx, c.y - drag.dy, a, b.width, b.height));
+    if (!drag.moved && Math.hypot(cursor.x - drag.sx, cursor.y - drag.sy) < 4)
+      return;
+    drag.moved = true;
+    const area = screen.getDisplayNearestPoint(cursor).workArea;
+    move(
+      confine(cursor.x - drag.dx, cursor.y - drag.dy, area, b.width, b.height),
+    );
     return;
   }
-  if (
-    hover ||
-    feedBusy ||
-    menuOpen ||
-    state.sleeping ||
-    !state.prefs.roam ||
-    state.reaction?.until > now
-  ) {
-    if (walking) resetMotion(1000);
-    return;
-  }
-  if (now < waitUntil) return;
-  const area = screen.getDisplayMatching(b).workArea;
-  if (!target) {
-    target = destination(b, area, b.width, b.height, state.prefs.edges);
-    precise = { x: b.x, y: b.y };
-    setWalking(true);
-  }
-  precise = advance(precise, target, 75, dt);
-  move(confine(precise.x, precise.y, area, b.width, b.height));
-  if (precise.arrived) {
-    resetMotion(2200 + Math.random() * 3500);
-    if (state.prefs.edges && Math.random() < 0.6)
-      pet.webContents.send('petdesk:motion', { walking: false, play: true });
-  }
+  const pose = wander.step(dt, {
+    roam: state.prefs.roam,
+    edges: state.prefs.edges,
+    blocked:
+      hover ||
+      feedBusy ||
+      menuOpen ||
+      state.sleeping ||
+      state.reaction?.until > now,
+  });
+  if (Math.round(wander.pos.x) !== b.x || Math.round(wander.pos.y) !== b.y)
+    move(wander.pos);
+  sendPose(pose);
 }
 async function runUtility(key) {
   try {
@@ -354,11 +374,7 @@ async function runUtility(key) {
 }
 function refreshTray() {
   if (!tray || tray.isDestroyed()) return;
-  tray.setToolTip(
-    'PetDesk · ' +
-      state.model.name +
-      (state.prefs.passThrough ? '（免打扰）' : ''),
-  );
+  tray.setToolTip('PetDesk · ' + state.model.name + '（可拖动 / 可投喂）');
   tray.setContextMenu(
     Menu.buildFromTemplate([
       { label: '打开桌宠工作台', click: () => showStudio() },
@@ -367,19 +383,6 @@ function refreshTray() {
         click: () => {
           if (pet) pet.close();
           else openPet();
-        },
-      },
-      {
-        label: '免打扰（所有点击穿透）',
-        type: 'checkbox',
-        checked: state.prefs.passThrough,
-        click: () => {
-          drag = null;
-          dispatch({
-            type: 'pref',
-            key: 'passThrough',
-            value: !state.prefs.passThrough,
-          });
         },
       },
       {
@@ -441,10 +444,6 @@ function petMenu() {
         { label: '打开计算器', click: util('calculator') },
       ],
     },
-    {
-      label: '进入免打扰（从托盘恢复）',
-      click: () => dispatch({ type: 'pref', key: 'passThrough', value: true }),
-    },
     { type: 'separator' },
     { label: '返回工作台', click: () => showStudio() },
     { label: '导入模型…', click: () => showStudio('models') },
@@ -485,7 +484,6 @@ function wire() {
     const prev = state.prefs.scale;
     dispatch(a);
     if (pet && prev !== state.prefs.scale) {
-      pet.setSize(...petSize());
       placeBack();
     }
     return snap();
@@ -509,26 +507,21 @@ function wire() {
   handle('menu', (e) => {
     if (e.sender === pet?.webContents) petMenu();
   });
-  handle('mask', (e, data) => {
-    if (
-      e.sender !== pet?.webContents ||
-      typeof data !== 'string' ||
-      data.length !== (((MASK_W * MASK_H) / 8) * 4) / 3
-    )
-      return;
-    mask = Buffer.from(data, 'base64');
-  });
   handle('drag', (e, on) => {
     if (e.sender !== pet?.webContents) return;
-    if (on === true && !feedBusy && !state.prefs.passThrough) {
+    if (on === true && !feedBusy && !drag) {
       const p = screen.getCursorScreenPoint(),
         b = pet.getBounds();
       resetMotion();
-      drag = { dx: p.x - b.x, dy: p.y - b.y, t: Date.now() };
-    } else {
-      drag = null;
-      resetMotion(1800);
-    }
+      drag = {
+        dx: p.x - b.x,
+        dy: p.y - b.y,
+        sx: p.x,
+        sy: p.y,
+        t: Date.now(),
+        moved: false,
+      };
+    } else if (on === false) settleDrag();
   });
   handle('feed', async (e, p) => {
     if (feedBusy) return { ok: false, message: '先等上一份点心处理完哦。' };

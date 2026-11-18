@@ -1,9 +1,49 @@
 // Test-only observer imported from an isolated COPY of main.mjs, never from the shipped app.
-import { app, BrowserWindow, dialog } from 'electron';
+import { app, BrowserWindow, dialog, screen } from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
 import assert from 'node:assert/strict';
 import { setTimeout as delay } from 'node:timers/promises';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { fileURLToPath } from 'node:url';
+const runFile = promisify(execFile);
+async function hitProbe(w, a, b, gesture) {
+  const p = screen.dipToScreenPoint(a),
+    q = screen.dipToScreenPoint(b);
+  const raw = w.getNativeWindowHandle(),
+    h = (
+      raw.length >= 8 ? raw.readBigUInt64LE(0) : raw.readUInt32LE(0)
+    ).toString();
+  await runFile(
+    path.join(
+      process.env.SystemRoot,
+      'System32',
+      'WindowsPowerShell',
+      'v1.0',
+      'powershell.exe',
+    ),
+    [
+      '-NoProfile',
+      '-NonInteractive',
+      '-File',
+      fileURLToPath(new URL('./win-hit-probe.ps1', import.meta.url)),
+      '-Handle',
+      h,
+      '-X',
+      String(p.x),
+      '-Y',
+      String(p.y),
+      '-X2',
+      String(q.x),
+      '-Y2',
+      String(q.y),
+      '-Gesture',
+      gesture,
+    ],
+    { timeout: 16000, windowsHide: true },
+  );
+}
 const dir = process.env.PETDESK_SMOKE_DIR;
 if (!dir) throw Error('Run via npm run smoke:desktop');
 const log = (m) =>
@@ -52,10 +92,7 @@ async function run() {
   );
   await until(
     () =>
-      evalIn(
-        pet,
-        "document.querySelector('.native .pet-art img')?.naturalWidth>0",
-      ),
+      evalIn(pet, "!!document.querySelector('.native .qwen-actor[data-clip]')"),
     'visible companion',
   );
   assert.equal(BrowserWindow.getAllWindows().length, 1);
@@ -70,11 +107,62 @@ async function run() {
     'PASS: direct pet-only launch, alpha background, topmost/nonfocusable, no keyboard focus',
   );
   await evalIn(pet, "window.petdesk.act({type:'pref',key:'roam',value:false})");
-  await evalIn(pet, "window.petdesk.act({type:'pat'})");
-  assert.equal(
-    await evalIn(pet, 'window.petdesk.snapshot().then(r=>r.state.stats.bond)'),
-    34,
-  );
+  await until(() => pet.isVisible(), 'pet window visible');
+  if (process.env.GITHUB_ACTIONS === 'true' && process.platform === 'win32') {
+    const b = pet.getBounds(),
+      center = {
+        x: b.x + Math.floor(b.width / 2),
+        y: b.y + Math.floor(b.height * 0.5),
+      },
+      corner = { x: b.x + 5, y: b.y + 5 };
+    await hitProbe(pet, center, corner, 'tap');
+    await until(
+      () =>
+        evalIn(
+          pet,
+          'window.petdesk.snapshot().then(r=>r.state.stats.bond===36)',
+        ),
+      'two OS clicks on actor and transparent corner',
+    );
+    assert.equal(pet.isFocused(), false);
+    log(
+      'PASS: Windows WindowFromPoint and OS-routed clicks, including the transparent corner, and no hit outside the window; no focus theft',
+    );
+    const area = screen.getDisplayMatching(b).workArea;
+    // Move the actual mouse, entering a short climb 44 DIP below the top-right corner.
+    const end = {
+      x: area.x + area.width - b.width + Math.floor(b.width / 2) - 1,
+      y: area.y + 44 + Math.floor(b.height * 0.5),
+    };
+    await hitProbe(pet, center, end, 'drag');
+    assert.ok(Math.abs(pet.getBounds().x + b.width - area.x - area.width) < 4);
+    await evalIn(
+      pet,
+      "window.petdesk.act({type:'pref',key:'roam',value:true})",
+    );
+    await until(
+      () =>
+        evalIn(
+          pet,
+          "document.querySelector('.qwen-actor')?.dataset.clip==='climb'",
+        ),
+      'actual wall pose after dragging to edge',
+    );
+    await until(
+      () =>
+        evalIn(
+          pet,
+          "document.querySelector('.qwen-actor')?.dataset.clip==='glide'",
+        ),
+      'ceiling fan traverse',
+    );
+    assert.equal(pet.getBounds().y, area.y);
+    log('PASS: real pickup/drag, right-wall climb and top-edge fan traverse');
+    await evalIn(
+      pet,
+      "window.petdesk.act({type:'pref',key:'roam',value:false})",
+    );
+  }
   await evalIn(pet, 'window.petdesk.studio()');
   const studio = await until(
     () => BrowserWindow.getAllWindows().find((w) => w !== pet),
@@ -84,32 +172,53 @@ async function run() {
     () => evalIn(studio, "!!document.querySelector('.behavior')"),
     'studio DOM',
   );
+  const before = pet.getBounds();
   await evalIn(
     studio,
-    `document.querySelector('[role="switch"][aria-label="免打扰模式"]').click()`,
+    `(()=>{const r=document.querySelector('.behavior input[type=range]');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(r,'1.4');r.dispatchEvent(new Event('input',{bubbles:true}));})()`,
   );
   await until(
-    () =>
-      evalIn(
-        pet,
-        'window.petdesk.snapshot().then(r=>r.state.prefs.passThrough)',
-      ),
-    'DND shared between windows',
+    () => pet.getBounds().height > before.height * 1.38,
+    'workspace scale updates native bounds',
   );
-  log('PASS: isolated preload bridge, interaction and DND state');
+  const bigger = pet.getBounds();
+  assert.ok(Math.abs(bigger.width / before.width - 1.4) < 0.015);
+  assert.ok(Math.abs(bigger.height / before.height - 1.4) < 0.015);
+  const box = await evalIn(
+    pet,
+    "(()=>{const b=document.querySelector('.pet-node').getBoundingClientRect();return [b.width,b.height,innerWidth,innerHeight]})()",
+  );
+  assert.ok(Math.abs(box[0] - box[2]) <= 1 && Math.abs(box[1] - box[3]) <= 1);
+  log(
+    'PASS: uniform scaling of art, hit target and native window via workstation slider',
+  );
   if (process.env.GITHUB_ACTIONS === 'true' && process.platform === 'win32') {
     const dl = path.join(dir, 'Downloads');
     fs.mkdirSync(dl);
     app.setPath('downloads', dl);
     const snack = path.join(dl, 'disposable-petdesk-qa.txt');
     fs.writeFileSync(snack, 'Disposable CI test fixture');
-    const dev = studio.webContents.debugger;
+    await evalIn(
+      pet,
+      `(()=>{const i=document.createElement('input');i.type='file';i.id='qa-fixture';i.hidden=true;document.body.append(i);})()`,
+    );
+    const dev = pet.webContents.debugger;
     dev.attach();
     const { root } = await dev.sendCommand('DOM.getDocument');
     const { nodeId } = await dev.sendCommand('DOM.querySelector', {
       nodeId: root.nodeId,
-      selector: 'input[aria-label="选择要投喂的文件"]',
+      selector: '#qa-fixture',
     });
+    const dropFixture = async () => {
+      await dev.sendCommand('DOM.setFileInputFiles', {
+        nodeId,
+        files: [snack],
+      });
+      await evalIn(
+        pet,
+        `(()=>{const b=document.querySelector('.pet-node'),dt=new DataTransfer();dt.items.add(document.querySelector('#qa-fixture').files[0]);for(const name of ['dragover','drop'])b.dispatchEvent(new DragEvent(name,{bubbles:true,cancelable:true,dataTransfer:dt}));})()`,
+      );
+    };
     let seen = 0;
     const original = dialog.showMessageBox;
     try {
@@ -119,10 +228,7 @@ async function run() {
         assert.equal(opts.cancelId, 0);
         return { response: seen++ === 0 ? 0 : 1 };
       };
-      await dev.sendCommand('DOM.setFileInputFiles', {
-        nodeId,
-        files: [snack],
-      });
+      await dropFixture();
       await until(() => seen === 1, 'real File path and cancel dialog');
       assert.ok(fs.existsSync(snack));
       assert.equal(
@@ -133,10 +239,7 @@ async function run() {
         0,
       );
       await delay(200);
-      await dev.sendCommand('DOM.setFileInputFiles', {
-        nodeId,
-        files: [snack],
-      });
+      await dropFixture();
       await until(() => seen === 2, 'confirm dialog');
       await until(
         () =>
@@ -147,6 +250,14 @@ async function run() {
         'actual Windows recycle bin operation',
       );
       assert.equal(fs.existsSync(snack), false);
+      await until(
+        () =>
+          evalIn(
+            pet,
+            "document.querySelector('.qwen-actor')?.dataset.clip==='eat'",
+          ),
+        'successful file meal draws the nibbling animation',
+      );
       log(
         'PASS: disposable fixture; cancel preserved file; confirm moved it using real shell.trashItem',
       );

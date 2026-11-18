@@ -19,7 +19,9 @@ jobs:
       - run: npm test
       - name: Build standalone Windows folder and lightweight starter
         run: ./scripts/windows-portable.ps1
-      - name: Check the real transparent window, isolated IPC and model switching
+      - name: Verify CRCs, SHA-256 pairs and installed atlases
+        run: python scripts/verify-bundle.py --windows
+      - name: Exercise actual pet hit target, motion, resize and confirmed file meals
         run: |
           $env:PETDESK_BINARY=(Resolve-Path 'out/PetDesk-*-Windows-x64/PetDesk.exe').Path
           npm run smoke:desktop
@@ -47,10 +49,10 @@ jobs:
       - name: Attach only to an existing release for this exact tested commit
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: petdesk-v1.0.0
+          TAG: petdesk-v1.1.0
         run: |
           set -eu
           # Upload to the explicitly prepared, unpublished test release; never retag or overwrite.
-          target=$(gh api "repos/$GITHUB_REPOSITORY/releases" --jq '.[] | select(.tag_name=="petdesk-v1.0.0" and .draft==true) | .target_commitish')
+          target=$(gh api "repos/$GITHUB_REPOSITORY/releases" --jq '.[] | select(.tag_name=="petdesk-v1.1.0" and .draft==true) | .target_commitish')
           if [ "$target" != "$GITHUB_SHA" ]; then echo 'No draft for this revision; ZIPs remain workflow artifacts.'; exit 0; fi
           gh release upload "$TAG" portable/*.zip portable/*.sha256 --repo "$GITHUB_REPOSITORY"

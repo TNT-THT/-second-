@@ -1,10 +1,28 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { Box, TriangleAlert, Heart, Cookie } from 'lucide-react';
+import { Box, TriangleAlert, Heart } from 'lucide-react';
 import { getModel } from './models.js';
 import { act, api, chirp, useStudio } from './store.js';
-import { advance, confine, destination } from '../core/motion.mjs';
-import { watchAlpha } from './hit-mask.js';
-export function Avatar({ model, className = '', flat = false }) {
+import {
+  actorSize,
+  confine,
+  resizeAnchored,
+  STILL,
+  Wander,
+} from '../core/motion.mjs';
+import { performanceFor } from '../core/performance.mjs';
+import { QwenActor } from './QwenActor.jsx';
+export function Avatar({
+  model,
+  className = '',
+  flat = false,
+  animated = false,
+  kind = 'idle',
+  face = 1,
+  trackRef,
+  token = 0,
+}) {
+  const actionRef = useRef({ kind, face });
+  actionRef.current = { kind, face };
   const [asset, setAsset] = useState(null),
     [error, setError] = useState('');
   const canvas = useRef(null);
@@ -35,7 +53,8 @@ export function Avatar({ model, className = '', flat = false }) {
       c = new AbortController();
     Promise.all([import('./three-model.js'), asset.blob.arrayBuffer()])
       .then(([m, b]) => {
-        if (!c.signal.aborted) return m.mountModel(el, b, c.signal);
+        if (!c.signal.aborted)
+          return m.mountModel(el, b, c.signal, () => actionRef.current);
       })
       .catch(() => {
         if (!c.signal.aborted) setError('3D 渲染不可用');
@@ -52,6 +71,10 @@ export function Avatar({ model, className = '', flat = false }) {
         <TriangleAlert size={20} />
         <small>{error}</small>
       </span>
+    );
+  if (model.id === 'qwen' && animated)
+    return (
+      <QwenActor kind={kind} face={face} trackRef={trackRef} token={token} />
     );
   if (model.id === 'qwen')
     return (
@@ -84,238 +107,290 @@ export function Avatar({ model, className = '', flat = false }) {
   );
 }
 export function Companion({ mode = 'stage', onFeed, notify, paused = false }) {
-  const { state } = useStudio();
+  const { state } = useStudio(),
+    { prefs, reaction, sleeping, model } = state,
+    native = mode === 'native';
   const plane = useRef(null),
     node = useRef(null),
-    pos = useRef({ x: 0, y: 0 }),
-    bounds = useRef(null),
-    target = useRef(null),
+    rig = useRef(null),
+    measure = useRef(null),
     drag = useRef(null),
-    hover = useRef(false),
-    dwell = useRef(0),
-    config = useRef();
-  const [walking, walk] = useState(false),
+    trackRef = useRef({ ...STILL });
+  const config = useRef(null),
+    pos = useRef({ x: 0, y: 0 }),
+    timers = useRef({}),
+    hoverRef = useRef(false),
+    dropRef = useRef(false);
+  const [track, setTrack] = useState(STILL),
     [held, setHeld] = useState(false),
-    [jump, setJump] = useState(false),
+    [landing, setLanding] = useState(false),
+    [hover, setHover] = useState(false),
     [drop, setDrop] = useState(false),
-    [tick, force] = useState(0);
-  const { prefs, reaction, sleeping, model } = state;
-  config.current = { prefs, sleeping, paused, until: reaction?.until || 0 };
-  const native = mode === 'native';
+    [, refresh] = useState(0);
+  config.current = { prefs, sleeping, reaction, paused };
+  function sync(t) {
+    if (!t) return;
+    const last = trackRef.current;
+    trackRef.current = t;
+    if (
+      last.kind !== t.kind ||
+      last.face !== t.face ||
+      last.surface !== t.surface ||
+      last.moving !== t.moving
+    )
+      setTrack(t);
+  }
   function place(p) {
-    pos.current = p;
-    const n = node.current,
-      b = bounds.current;
-    if (n) {
-      n.style.left = p.x + 'px';
-      n.style.top = p.y + 'px';
-      n.dataset.flip = p.y < 37 ? 'true' : 'false';
-      if (b) {
-        const cx = p.x + b.w / 2;
-        n.style.setProperty(
-          '--bubble-shift',
-          Math.max(0, 85 - cx) - Math.max(0, cx - b.width + 85) + 'px',
-        );
-      }
-    }
+    pos.current = { ...p };
+    const el = node.current,
+      b = rig.current;
+    if (!el || !b) return;
+    el.style.left = Math.round(p.x) + 'px';
+    el.style.top = Math.round(p.y) + 'px';
+    el.dataset.flip = p.y < 35 ? 'true' : 'false';
+    const cx = p.x + b.size.width / 2;
+    el.style.setProperty(
+      '--bubble-shift',
+      Math.max(0, 82 - cx) - Math.max(0, cx - b.area.width + 82) + 'px',
+    );
   }
   useEffect(() => {
     if (!reaction) return;
-    const timer = setTimeout(
-      () => force((t) => t + 1),
-      Math.max(0, reaction.until - Date.now() + 20),
+    const tm = setTimeout(
+      () => refresh((v) => v + 1),
+      Math.max(0, reaction.until - Date.now() + 12),
     );
-    return () => clearTimeout(timer);
+    return () => clearTimeout(tm);
   }, [reaction]);
+  useEffect(
+    () => () => {
+      for (const t of Object.values(timers.current)) clearTimeout(t);
+    },
+    [],
+  );
   useLayoutEffect(() => {
     if (native) return;
+    const el = node.current,
+      p = plane.current;
     let raf,
-      last = 0,
-      was = false,
-      initialized = false,
-      jumpTimer;
-    function measure() {
-      if (!node.current || !plane.current) return;
-      const p = plane.current,
-        n = node.current;
-      const old = bounds.current;
-      const b = {
-        x: 0,
-        y: 0,
-        width: p.clientWidth,
-        height: p.clientHeight,
-        w: n.offsetWidth,
-        h: n.offsetHeight,
-      };
-      const fx =
-          initialized && old?.width > old.w
-            ? pos.current.x / (old.width - old.w)
-            : mode === 'float'
-              ? 0.78
-              : 0.495,
-        fy =
-          initialized && old?.height > old.h
-            ? pos.current.y / (old.height - old.h)
-            : mode === 'float'
-              ? 0.77
-              : 0.85;
-      bounds.current = b;
-      place(confine(fx * (b.width - b.w), fy * (b.height - b.h), b, b.w, b.h));
-      target.current = null;
-      dwell.current = performance.now() + 7000;
-      initialized = true;
-    }
-    measure();
-    const ro = new ResizeObserver(measure);
-    ro.observe(plane.current);
-    ro.observe(node.current);
-    function run(t) {
-      raf = requestAnimationFrame(run);
-      if (t - last < 35) return;
-      const dt = (t - last) / 1000;
-      last = t;
-      const c = config.current,
-        b = bounds.current;
-      let moving = false;
+      last = 0;
+    function fit() {
+      if (!p.clientWidth || !p.clientHeight) return;
+      const a = { x: 0, y: 0, width: p.clientWidth, height: p.clientHeight },
+        base = p.closest('.expanded')
+          ? 258
+          : window.innerWidth < 760
+            ? Math.min(184, Math.max(145, window.innerWidth * 0.32))
+            : 225;
+      const size = actorSize(
+        config.current.prefs.scale,
+        a,
+        base,
+        Math.min(39, a.height * 0.13),
+      );
+      el.style.height = size.height + 'px';
+      el.style.width = size.width + 'px';
+      const old = rig.current;
       if (
-        !document.hidden &&
-        b?.width &&
-        c.prefs.roam &&
-        !c.sleeping &&
-        !c.paused &&
-        !drag.current &&
-        !hover.current &&
-        t > dwell.current &&
-        Date.now() > c.until
-      ) {
-        if (!target.current) {
-          // Keep the habitat's feet on the terrace, not in the painted sky.
-          const ground =
-            mode === 'stage'
-              ? {
-                  ...b,
-                  y: (b.height - b.h) * 0.72,
-                  height: b.height - (b.height - b.h) * 0.72,
-                }
-              : b;
-          target.current = destination(
-            pos.current,
-            ground,
-            b.w,
-            b.h,
-            c.prefs.edges,
+        old &&
+        old.area.width === a.width &&
+        old.area.height === a.height &&
+        old.size.width === size.width &&
+        old.size.height === size.height
+      )
+        return;
+      if (!old) {
+        const pos = {
+          x: (a.width - size.width) * 0.495,
+          y: (a.height - size.height) * 0.84,
+        };
+        rig.current = new Wander(pos, a, size, { surface: 'floor', wait: 6 });
+      } else {
+        const oldbox = { ...old.pos, ...old.size };
+        let n = resizeAnchored(oldbox, size, a, old.surface);
+        if (old.area.width !== a.width || old.area.height !== a.height) {
+          n = confine(
+            ((a.width - size.width) * old.pos.x) /
+              Math.max(1, old.area.width - old.size.width),
+            ((a.height - size.height) * old.pos.y) /
+              Math.max(1, old.area.height - old.size.height),
+            a,
+            size.width,
+            size.height,
           );
         }
-        const next = advance(
-          pos.current,
-          target.current,
-          mode === 'stage' ? 22 : 52,
-          dt,
-        );
-        place(next);
-        moving = !next.arrived;
-        if (next.arrived) {
-          target.current = null;
-          dwell.current = t + 2600 + Math.random() * 3900;
-          if (c.prefs.edges && Math.random() < 0.5) {
-            setJump(true);
-            jumpTimer = setTimeout(() => setJump(false), 900);
-          }
-        }
-      } else if (
-        target.current &&
-        (c.sleeping || !c.prefs.roam || drag.current)
-      )
-        target.current = null;
-      if (moving !== was) {
-        walk(moving);
-        was = moving;
+        old.place(n, a, size, { surface: old.surface, wait: 1 });
       }
+      place(rig.current.pos);
+      sync(rig.current.track());
+    }
+    fit();
+    measure.current = fit;
+    const ro = new ResizeObserver(fit);
+    ro.observe(p);
+    function run(t) {
+      raf = requestAnimationFrame(run);
+      if (t - last < 32) return;
+      const dt = (t - last) / 1000;
+      last = t;
+      const r = rig.current,
+        c = config.current;
+      if (!r || document.hidden || drag.current) return;
+      const pose = r.step(dt, {
+        roam: c.prefs.roam,
+        edges: c.prefs.edges,
+        blocked:
+          c.sleeping ||
+          hoverRef.current ||
+          dropRef.current ||
+          c.paused ||
+          c.reaction?.until > Date.now(),
+      });
+      if (r.pos.x !== pos.current.x || r.pos.y !== pos.current.y) place(r.pos);
+      sync(pose);
     }
     raf = requestAnimationFrame(run);
     return () => {
       cancelAnimationFrame(raf);
       ro.disconnect();
-      clearTimeout(jumpTimer);
-    };
-  }, [mode, native]);
-  useEffect(() => {
-    if (!native) return;
-    let tm;
-    const off = api.onMotion((m) => {
-      walk(!!m.walking);
-      if (m.play) {
-        setJump(true);
-        clearTimeout(tm);
-        tm = setTimeout(() => setJump(false), 900);
-      }
-    });
-    return () => {
-      off();
-      clearTimeout(tm);
+      measure.current = null;
     };
   }, [native]);
+  useLayoutEffect(() => {
+    measure.current?.();
+  }, [prefs.scale]);
   useEffect(() => {
-    if (native && !prefs.passThrough)
-      return watchAlpha(plane.current, api.mask);
-  }, [native, prefs.passThrough]);
-  function pat() {
-    chirp();
+    if (!native) return;
+    let alive = true,
+      seen = false;
+    const off = api.onMotion((t) => {
+      seen = true;
+      sync(t);
+    });
+    api
+      .snapshot()
+      .then((v) => {
+        if (alive && !seen) sync(v.motion);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+      off();
+    };
+  }, [native]);
+  const pat = () => {
+    chirp('pat');
     void act({ type: 'pat' });
-  }
+  };
   function down(e) {
     if (e.button !== 0 || drag.current) return;
     e.preventDefault();
     e.currentTarget.setPointerCapture(e.pointerId);
-    drag.current = {
+    const d = {
+      id: e.pointerId,
       sx: e.screenX,
       sy: e.screenY,
       x: pos.current.x,
       y: pos.current.y,
       moved: false,
+      long: false,
+      lastX: e.screenX,
+      lastAt: performance.now(),
     };
-    setHeld(true);
-    target.current = null;
+    drag.current = d;
+    clearTimeout(timers.current.land);
+    setLanding(false);
+    rig.current?.stop();
+    timers.current.hold = setTimeout(() => {
+      if (drag.current === d) {
+        d.long = true;
+        setHeld(true);
+      }
+    }, 180);
     if (native) void api.drag(true);
   }
-  function move(e) {
+  function movePointer(e) {
     const d = drag.current;
-    if (!d) return;
+    if (!d || e.pointerId !== d.id) return;
     const dx = e.screenX - d.sx,
       dy = e.screenY - d.sy;
-    if (Math.hypot(dx, dy) > 4) d.moved = true;
-    if (!native && d.moved && bounds.current) {
-      const b = bounds.current;
-      place(confine(d.x + dx, d.y + dy, b, b.w, b.h));
+    if (Math.hypot(dx, dy) >= 4) {
+      d.moved = true;
+      setHeld(true);
+    }
+    if (!d.moved) return;
+    const t = performance.now(),
+      vx = (e.screenX - d.lastX) / Math.max(12, t - d.lastAt);
+    d.lastX = e.screenX;
+    d.lastAt = t;
+    node.current.style.setProperty(
+      '--lift-tilt',
+      Math.max(-7, Math.min(7, -vx * 5)) + 'deg',
+    );
+    clearTimeout(timers.current.tilt);
+    timers.current.tilt = setTimeout(
+      () => node.current?.style.setProperty('--lift-tilt', '0deg'),
+      100,
+    );
+    if (!native && rig.current) {
+      const r = rig.current;
+      r.pos = confine(d.x + dx, d.y + dy, r.area, r.size.width, r.size.height);
+      place(r.pos);
     }
   }
   function up(e, cancel = false) {
     const d = drag.current;
-    if (!d) return;
+    if (!d || e.pointerId !== d.id) return;
     drag.current = null;
+    clearTimeout(timers.current.hold);
     setHeld(false);
     if (native) void api.drag(false);
     if (e.currentTarget.hasPointerCapture(e.pointerId))
       e.currentTarget.releasePointerCapture(e.pointerId);
-    dwell.current = performance.now() + 3000;
-    if (!cancel && !d.moved) pat();
+    const r = rig.current;
+    if (r) {
+      r.place(r.pos, r.area, r.size, {
+        wait: 1.3,
+        snap: d.moved && prefs.edges,
+      });
+      place(r.pos);
+      sync(r.track());
+    }
+    if (d.moved || d.long) {
+      setLanding(true);
+      timers.current.land = setTimeout(() => setLanding(false), 380);
+    } else if (!cancel) pat();
+  }
+  function overFiles(on) {
+    dropRef.current = on;
+    setDrop(on);
   }
   const live = reaction && reaction.until > Date.now() ? reaction : null;
-  const kind = held
-    ? 'held'
-    : sleeping
-      ? 'sleep'
-      : live?.kind || (jump ? 'play' : walking ? 'walk' : 'idle');
+  const kind = performanceFor({
+    track,
+    held,
+    landing,
+    offer: drop,
+    hover,
+    sleeping,
+    reaction: live,
+  });
+  const face = ['walk', 'climb', 'glide'].includes(kind) ? track.face : 1;
   const speech = drop
-    ? '啊，是我的点心吗？'
+    ? '先看看，是什么点心？'
     : held
-      ? '要去哪里呀？'
+      ? '慢一点，我扶好帽子啦！'
       : live?.text ||
-        (sleeping
-          ? '呼… z Z'
-          : walking
-            ? '去那边逛逛～'
-            : '今天也请多多关照。');
+        {
+          sleep: '呼… z Z',
+          play: '请看这一式花间扇。',
+          walk: '一起走走吧。',
+          climb: '我来攀这边。',
+          glide: '搭一程扇上的风。',
+          notice: '我在这里。',
+          land: '稳稳落地。',
+        }[kind] ||
+        '今天也请多多关照。';
   return (
     <div
       ref={plane}
@@ -324,23 +399,22 @@ export function Companion({ mode = 'stage', onFeed, notify, paused = false }) {
         if (e.dataTransfer.types.includes('Files')) {
           e.preventDefault();
           e.dataTransfer.dropEffect = 'copy';
-          setDrop(true);
+          overFiles(true);
         }
       }}
       onDragLeave={(e) => {
-        if (!e.currentTarget.contains(e.relatedTarget)) setDrop(false);
+        if (!e.currentTarget.contains(e.relatedTarget)) overFiles(false);
       }}
       onDrop={(e) => {
         e.preventDefault();
         e.stopPropagation();
-        setDrop(false);
+        overFiles(false);
         onFeed?.(e.dataTransfer.files, e.dataTransfer.items);
       }}
       onContextMenu={(e) => {
-        if (native) {
-          e.preventDefault();
-          void api.menu();
-        }
+        e.preventDefault();
+        if (native) void api.menu();
+        else notify?.('预览中可以点按或拖动角色；桌面版右键可打开伙伴菜单。');
       }}
     >
       <div
@@ -348,51 +422,77 @@ export function Companion({ mode = 'stage', onFeed, notify, paused = false }) {
         role="button"
         tabIndex="0"
         aria-label={`${model.name}，点击摸头，拖动移动`}
+        data-pose={kind}
+        data-surface={track.surface}
+        data-facing={face < 0 ? 'left' : 'right'}
         className={'pet-node ' + (held ? 'held' : '')}
-        style={{ '--pet-scale': prefs.scale }}
         onPointerDown={down}
-        onPointerMove={move}
+        onPointerMove={movePointer}
         onPointerUp={up}
         onPointerCancel={(e) => up(e, true)}
         onLostPointerCapture={(e) => up(e, true)}
         onPointerEnter={() => {
-          hover.current = true;
+          hoverRef.current = true;
+          setHover(true);
         }}
         onPointerLeave={() => {
-          hover.current = false;
+          hoverRef.current = false;
+          setHover(false);
         }}
         onKeyDown={(e) => {
           if (['Enter', ' '].includes(e.key)) {
             e.preventDefault();
-            pat();
-          }
-        }}
-        onContextMenu={(e) => {
-          if (mode === 'float') {
-            e.preventDefault();
-            notify?.('点击左下角「收回」即可返回工作台。');
+            if (!e.repeat) pat();
           }
         }}
       >
-        {(!native || ((live || held || drop) && !prefs.passThrough)) && (
+        {(!native || live || drop) && (
           <div className="pet-speech">
             {speech}
-            {!live && !sleeping && !walking && !held && !drop && (
+            {!live && kind === 'idle' && (
               <span className="speech-heart">♥</span>
             )}
           </div>
         )}
-        <span className="pet-shadow" />
-        <div className={'pet-art ani-' + kind}>
-          <Avatar model={model} />
+        {track.surface === 'floor' &&
+          !['held', 'glide', 'climb'].includes(kind) && (
+            <span className="pet-shadow" />
+          )}
+        <div
+          className={
+            'pet-art ' +
+            (model.id === 'qwen'
+              ? 'authored'
+              : model.kind === 'image'
+                ? 'image-adapter'
+                : 'model-adapter')
+          }
+          style={{ '--facing': face }}
+        >
+          <Avatar
+            model={model}
+            animated
+            kind={kind}
+            face={face}
+            trackRef={trackRef}
+            token={live?.id || 0}
+          />
         </div>
-        {(kind === 'pat' || kind === 'eat') && (
-          <span className="pet-emote" key={state.reaction?.id}>
-            {kind === 'eat' ? (
-              <Cookie size={22} />
-            ) : (
-              <Heart size={22} fill="#e997b1" />
-            )}
+        {kind === 'pat' && (
+          <span className="pet-emote" key={live?.id}>
+            <Heart size={17} fill="#e7a1bc" />
+          </span>
+        )}
+        {kind === 'eat' && (
+          <span className="biscuit-crumbs" aria-hidden="true">
+            <i />
+            <i />
+            <i />
+          </span>
+        )}
+        {kind === 'sleep' && (
+          <span className="sleep-letters" aria-hidden="true">
+            z Z
           </span>
         )}
       </div>

@@ -1,4 +1,5 @@
-export const VERSION = '1.0.0';
+import { MIN_SCALE, MAX_SCALE } from './motion.mjs';
+export const VERSION = '1.1.0';
 export const DEFAULT_MODEL = Object.freeze({
   id: 'qwen',
   name: 'Qwen 娘',
@@ -8,7 +9,6 @@ export const DEFAULT_PREFS = Object.freeze({
   roam: true,
   edges: true,
   sound: false,
-  passThrough: false,
   scale: 1,
   scene: 'meadow',
 });
@@ -60,10 +60,10 @@ export function restoreState(input, now = Date.now()) {
   if (!input || input.version !== 1) return s;
   for (const k of Object.keys(s.stats))
     s.stats[k] = clamp(whole(input.stats?.[k], s.stats[k]), 0, 100);
-  for (const k of ['roam', 'edges', 'sound', 'passThrough'])
+  for (const k of ['roam', 'edges', 'sound'])
     if (typeof input.prefs?.[k] === 'boolean') s.prefs[k] = input.prefs[k];
   if (Number.isFinite(input.prefs?.scale))
-    s.prefs.scale = clamp(input.prefs.scale, 0.75, 1.4);
+    s.prefs.scale = clamp(input.prefs.scale, MIN_SCALE, MAX_SCALE);
   if (input.prefs?.scene === 'dusk') s.prefs.scene = 'dusk';
   if (validModel(input.model)) s.model = cleanModel(input.model);
   s.sleeping = input.sleeping === true;
@@ -127,7 +127,7 @@ export function reduceState(state, a, now = Date.now()) {
       inc('mood', 6);
       inc('bond', 1);
       inc('fullness', -3);
-      react('play', '看我跳得多高！');
+      react('play', '看好啦，这一式叫花间摇扇。');
       log('interact', `和${s.model.name}玩了一会儿。`);
       break;
     case 'nap':
@@ -138,7 +138,7 @@ export function reduceState(state, a, now = Date.now()) {
       );
       log(
         'interact',
-        s.sleeping ? '伙伴蜷起来，开始小憩。' : '伙伴睡醒了，伸了个懒腰。',
+        s.sleeping ? '伙伴合眼垂首，小憩片刻。' : '伙伴睡醒了，伸了个懒腰。',
       );
       break;
     case 'meal':
@@ -169,10 +169,14 @@ export function reduceState(state, a, now = Date.now()) {
     case 'pref': {
       const { key, value } = a;
       if (
-        ['roam', 'edges', 'sound', 'passThrough'].includes(key)
+        ['roam', 'edges', 'sound'].includes(key)
           ? typeof value !== 'boolean'
           : key === 'scale'
-            ? !(Number.isFinite(value) && value >= 0.75 && value <= 1.4)
+            ? !(
+                Number.isFinite(value) &&
+                value >= MIN_SCALE &&
+                value <= MAX_SCALE
+              )
             : key === 'scene'
               ? !['meadow', 'dusk'].includes(value)
               : true

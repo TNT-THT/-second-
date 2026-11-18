@@ -1,0 +1,79 @@
+{
+  "idle": {
+    "frames": 28,
+    "cols": 4,
+    "width": 352,
+    "height": 480,
+    "seconds": 3.5
+  },
+  "notice": {
+    "frames": 16,
+    "cols": 4,
+    "width": 352,
+    "height": 480,
+    "seconds": 1.35
+  },
+  "walk": {
+    "frames": 24,
+    "cols": 4,
+    "width": 352,
+    "height": 480,
+    "seconds": 1.0
+  },
+  "climb": {
+    "frames": 24,
+    "cols": 4,
+    "width": 352,
+    "height": 480,
+    "seconds": 1.3
+  },
+  "glide": {
+    "frames": 20,
+    "cols": 4,
+    "width": 352,
+    "height": 480,
+    "seconds": 1.65
+  },
+  "held": {
+    "frames": 20,
+    "cols": 4,
+    "width": 352,
+    "height": 480,
+    "seconds": 1.35
+  },
+  "eat": {
+    "frames": 24,
+    "cols": 4,
+    "width": 352,
+    "height": 480,
+    "seconds": 1.6
+  },
+  "play": {
+    "frames": 24,
+    "cols": 4,
+    "width": 352,
+    "height": 480,
+    "seconds": 1.55
+  },
+  "pat": {
+    "frames": 18,
+    "cols": 4,
+    "width": 352,
+    "height": 480,
+    "seconds": 1.2
+  },
+  "sleep": {
+    "frames": 20,
+    "cols": 4,
+    "width": 352,
+    "height": 480,
+    "seconds": 3.0
+  },
+  "land": {
+    "frames": 12,
+    "cols": 4,
+    "width": 352,
+    "height": 480,
+    "seconds": 0.38
+  }
+}

@@ -31,7 +31,6 @@ contextBridge.exposeInMainWorld(
     utility: (key) => invoke('utility', key),
     menu: () => invoke('menu'),
     drag: (on) => invoke('drag', on),
-    mask: (data) => invoke('mask', data),
     onState: (cb) => listen('state', cb),
     onMotion: (cb) => listen('motion', cb),
     onPage: (cb) => listen('page', cb),

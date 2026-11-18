@@ -43,6 +43,10 @@ try {
     new URL('./native-probe.mjs', import.meta.url),
     path.join(appDir, 'desktop/native-probe.mjs'),
   );
+  await fs.copyFile(
+    new URL('./win-hit-probe.ps1', import.meta.url),
+    path.join(appDir, 'desktop/win-hit-probe.ps1'),
+  );
   const main = path.join(appDir, 'desktop/main.mjs');
   await fs.writeFile(
     main,

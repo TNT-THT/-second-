@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import {
   ArrowUpRight,
-  BellOff,
+  Clapperboard,
   BookOpen,
   Box,
   Boxes,
@@ -61,6 +61,8 @@ import {
   setPet,
   useStudio,
 } from './store.js';
+import { MotionRoom } from './MotionRoom.jsx';
+import { MIN_SCALE, MAX_SCALE } from '../core/motion.mjs';
 import { Companion, Avatar } from './Companion.jsx';
 import { importModel, listModels, removeModel } from './models.js';
 import { Modal, IconButton, Toggle, SnackArt } from './ui.jsx';
@@ -158,12 +160,25 @@ function PanelTitle({ icon: Icon, title, children }) {
     </div>
   );
 }
-function Stage({ feed, notify, state, expanded, onExpand, paused }) {
+function Stage({
+  feed,
+  notify,
+  state,
+  expanded,
+  onExpand,
+  paused,
+  onMotionRoom,
+}) {
   const dusk = state.prefs.scene === 'dusk';
   return (
     <section className={'panel stage-panel ' + (expanded ? 'expanded' : '')}>
       <PanelTitle icon={MonitorPlay} title="实时预览">
         <div className="inline-tools">
+          <button className="motion-room-btn" onClick={onMotionRoom}>
+            <Clapperboard size={14} />
+            动作试映
+          </button>
+          <span className="tool-divider" />
           <IconButton
             label={state.prefs.sound ? '关闭交互音效' : '开启交互音效'}
             onClick={() => pref('sound', !state.prefs.sound)}
@@ -179,7 +194,10 @@ function Stage({ feed, notify, state, expanded, onExpand, paused }) {
           </IconButton>
         </div>
       </PanelTitle>
-      <div className={'habitat ' + (dusk ? 'dusk' : '')}>
+      <div
+        className={'habitat ' + (dusk ? 'dusk' : '')}
+        style={{ '--actor-scale': state.prefs.scale }}
+      >
         <div className="habitat-art" />
         <div className="habitat-vignette" />
         <span className="scene-live">
@@ -378,6 +396,26 @@ function SwitchRow({ icon: I, title, desc, value, change }) {
     </div>
   );
 }
+function ScaleControl({ value }) {
+  const pct = Math.round(value * 100);
+  return (
+    <label className="size-label">
+      <span>
+        角色大小 <b>{pct}%</b>
+      </span>
+      <input
+        aria-label="角色大小"
+        aria-valuetext={`${pct}% 等比例`}
+        type="range"
+        min={MIN_SCALE}
+        max={MAX_SCALE}
+        step="0.05"
+        value={value}
+        onChange={(e) => pref('scale', +e.target.value)}
+      />
+    </label>
+  );
+}
 function Behavior({ state, settings }) {
   return (
     <section className="panel behavior">
@@ -394,13 +432,7 @@ function Behavior({ state, settings }) {
           value={state.prefs.roam}
           change={(v) => pref('roam', v)}
         />
-        <SwitchRow
-          icon={BellOff}
-          title="免打扰模式"
-          desc="让所有点击穿过桌面角色"
-          value={state.prefs.passThrough}
-          change={(v) => pref('passThrough', v)}
-        />
+        <ScaleControl value={state.prefs.scale} />
       </div>
     </section>
   );
@@ -513,7 +545,7 @@ function Library({ state, models, onImport, onRemove, loading, sample }) {
           <b>只保存在这台设备</b>
           <p>
             导入是复制，不会移动原文件。每个模型最大 24 MB；GLB
-            需将网格和纹理全部内嵌，支持播放待机动画。
+            需将网格和纹理全部内嵌，支持按动作名称切换动画。
           </p>
         </div>
       </div>
@@ -615,7 +647,7 @@ function Guide({ download = false }) {
           [
             '02',
             '只接住属于她的点击',
-            '点角色摸头，按住拖动，右键打开菜单。透明处可点穿；托盘开启免打扰后角色也能点穿。',
+            '角色小窗始终接收鼠标：点按回礼、按住提起、拖动再松手。小窗以外不拦点击，也不抢键盘焦点。',
           ],
           [
             '03',
@@ -625,7 +657,7 @@ function Guide({ download = false }) {
           [
             '04',
             '随时找回工作台',
-            '右键系统托盘的 PetDesk 图标，或再次启动程序，即可打开工作台、恢复互动或退出。',
+            '右键系统托盘的 PetDesk 图标，或再次启动程序，即可打开工作台、调整大小或退出。',
           ],
         ].map(([n, t, d]) => (
           <div key={n}>
@@ -670,26 +702,7 @@ function Settings({ state, utility }) {
           value={p.sound}
           change={(v) => pref('sound', v)}
         />
-        <SwitchRow
-          icon={BellOff}
-          title="免打扰模式"
-          desc="不挡鼠标；通过系统托盘恢复角色互动"
-          value={p.passThrough}
-          change={(v) => pref('passThrough', v)}
-        />
-        <label className="size-label">
-          <span>
-            角色大小 <b>{Math.round(p.scale * 100)}%</b>
-          </span>
-          <input
-            type="range"
-            min=".75"
-            max="1.4"
-            step=".05"
-            value={p.scale}
-            onChange={(e) => pref('scale', +e.target.value)}
-          />
-        </label>
+        <ScaleControl value={p.scale} />
       </div>
       <div className="tools-section">
         <h3>桌面小工具</h3>
@@ -889,6 +902,7 @@ function Studio() {
               expanded={expanded}
               onExpand={() => expand((v) => !v)}
               paused={!!dialog}
+              onMotionRoom={() => show('motion')}
             />
             <Profile state={state} toModels={() => go('models')} />
             <DropStation feed={feed} />
@@ -930,6 +944,7 @@ function Studio() {
               guide: '桌宠使用指南',
               download: '带伙伴回到桌面',
               settings: '工作台设置',
+              motion: '伙伴动作试映',
               meal: '模拟文件投喂',
               remove: '移除这个模型？',
               clear: '清空活动记录？',
@@ -940,6 +955,7 @@ function Studio() {
               guide: 'QUICK GUIDE',
               download: 'DESKTOP EDITION',
               settings: 'PREFERENCES',
+              motion: 'MOTION ATELIER',
               meal: 'FEEDING PREVIEW',
               remove: 'MODEL LIBRARY',
               clear: 'ACTIVITY JOURNAL',
@@ -950,6 +966,7 @@ function Studio() {
           {['guide', 'download'].includes(dialog.type) && (
             <Guide download={dialog.type === 'download'} />
           )}
+          {dialog.type === 'motion' && <MotionRoom />}
           {dialog.type === 'settings' && (
             <Settings state={state} utility={utility} />
           )}

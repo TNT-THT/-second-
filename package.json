@@ -1,7 +1,7 @@
 {
   "name": "petdesk-studio",
   "productName": "PetDesk",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
   "description": "不抢焦点的透明 Qwen 娘桌宠工作台",
   "type": "module",

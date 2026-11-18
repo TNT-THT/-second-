@@ -476,8 +476,7 @@ footer > span,
 }
 .pet-node {
   position: absolute;
-  width: calc(146px * var(--pet-scale, 1));
-  height: calc(226px * var(--pet-scale, 1));
+  aspect-ratio: 352 / 480;
   cursor: grab;
   touch-action: none;
   display: flex;
@@ -565,58 +564,6 @@ footer > span,
   color: #d992ad;
   pointer-events: none;
   animation: rising 1.35s ease-out infinite;
-}
-.ani-idle,
-.ani-time,
-.ani-wake {
-  animation: breathe 3.7s ease-in-out infinite;
-}
-.ani-walk {
-  animation: step 0.62s ease-in-out infinite;
-}
-.ani-play,
-.ani-pat {
-  animation: hop 0.82s ease-in-out infinite;
-}
-.ani-sleep {
-  animation: doze 3.2s ease-in-out infinite;
-}
-.ani-eat {
-  animation: nibble 0.65s ease-in-out infinite;
-}
-.ani-held {
-  transform: rotate(2deg) translateY(-2px);
-}
-@keyframes breathe {
-  50% {
-    transform: translateY(-2px) scaleY(1.006);
-  }
-}
-@keyframes step {
-  25% {
-    transform: translateY(-2px) rotate(-1.2deg);
-  }
-  75% {
-    transform: translateY(-1px) rotate(1.2deg);
-  }
-}
-@keyframes hop {
-  45% {
-    transform: translateY(-8px) rotate(-2deg);
-  }
-  85% {
-    transform: scaleY(0.985);
-  }
-}
-@keyframes doze {
-  50% {
-    transform: rotate(-2deg) scaleY(0.98);
-  }
-}
-@keyframes nibble {
-  50% {
-    transform: rotate(1.5deg) scaleY(0.985);
-  }
 }
 @keyframes rising {
   from {
@@ -1396,10 +1343,6 @@ footer em {
   aspect-ratio: auto;
   min-height: 0;
 }
-.expanded .pet-node {
-  width: calc(172px * var(--pet-scale));
-  height: calc(250px * var(--pet-scale));
-}
 .expand-shade {
   z-index: 41;
 }
@@ -1419,17 +1362,24 @@ footer em {
   box-shadow: none;
 }
 .native .pet-node {
-  left: 50%;
-  bottom: 5px;
-  transform: translateX(-50%);
-  width: calc(165px * var(--pet-scale));
-  height: calc(190px * var(--pet-scale));
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  aspect-ratio: auto;
+  /* Alpha zero is OS click-through on some layered windows. Two alpha levels of ink
+     give the ENTIRE compact actor rectangle a stable hit surface, even between feet. */
+  background: rgba(0, 0, 0, 0.008);
 }
 .native .pet-speech {
-  bottom: calc(100% + 5px);
-  font-size: 11px;
+  bottom: 2px;
   left: 50%;
-  border: 1px solid #d8d1e3;
+  font-size: 10px;
+  max-width: 96%;
+  padding: 3px 6px;
+  text-align: center;
+}
+.native .pet-speech:after {
+  display: none;
 }
 .native .pet-shadow {
   opacity: 0.55;
@@ -1582,10 +1532,7 @@ html[data-surface='pet'] #root {
     min-height: 0;
     aspect-ratio: 1.9;
   }
-  .pet-node {
-    height: calc(clamp(126px, 27vw, 188px) * var(--pet-scale));
-    width: calc(clamp(94px, 19vw, 131px) * var(--pet-scale));
-  }
+
   .profile-body {
     padding: 0 18px 16px;
   }
@@ -1751,6 +1698,246 @@ html[data-surface='pet'] #root {
   }
 }
 
-.stage .pet-node {
-  max-height: calc(100% - 43px);
+/* The baked actor controls its own limbs. Only pickup inertia is applied outside the rig. */
+.pet-node[data-pose='held'] .pet-art {
+  transform-origin: 50% 24%;
+  transform: rotate(var(--lift-tilt, 0deg));
+  transition: transform 0.16s ease-out;
+}
+.pet-node .image-adapter .avatar {
+  transform: scaleX(var(--facing, 1));
+}
+.pet-node[data-pose='walk'] .image-adapter {
+  animation: custom-step 0.54s ease-in-out infinite;
+}
+.pet-node[data-pose='climb'] .image-adapter {
+  animation: custom-grip 0.75s ease-in-out infinite;
+}
+.pet-node[data-pose='glide'] .image-adapter {
+  animation: custom-glide 1.7s ease-in-out infinite;
+}
+.pet-node[data-pose='play'] .image-adapter,
+.pet-node[data-pose='land'] .image-adapter {
+  animation: custom-hop 0.7s ease-in-out infinite;
+}
+.pet-node[data-pose='eat'] .image-adapter,
+.pet-node[data-pose='pat'] .image-adapter,
+.pet-node[data-pose='notice'] .image-adapter {
+  animation: custom-nod 0.75s ease-in-out infinite;
+}
+.pet-node[data-pose='sleep'] .image-adapter {
+  animation: custom-nod 3s ease-in-out infinite;
+}
+@keyframes custom-step {
+  25% {
+    transform: rotate(-2deg) translateY(-2%);
+  }
+  75% {
+    transform: rotate(2deg);
+  }
+}
+@keyframes custom-grip {
+  50% {
+    transform: translateY(-2%) rotate(3deg);
+  }
+}
+@keyframes custom-glide {
+  50% {
+    transform: translateY(2%) rotate(-3deg);
+  }
+}
+@keyframes custom-hop {
+  45% {
+    transform: translateY(-5%) rotate(-3deg);
+  }
+}
+@keyframes custom-nod {
+  50% {
+    transform: rotate(2deg) scaleY(0.985);
+  }
+}
+.biscuit-crumbs {
+  position: absolute;
+  left: 49%;
+  top: 19%;
+  width: 1px;
+  height: 1px;
+  pointer-events: none;
+}
+.biscuit-crumbs i {
+  position: absolute;
+  width: 3px;
+  height: 3px;
+  border-radius: 1px;
+  background: #d9a460;
+  animation: crumb 1.6s ease-out infinite;
+}
+.biscuit-crumbs i:nth-child(2) {
+  --crumb-x: 7px;
+  animation-delay: 0.14s;
+}
+.biscuit-crumbs i:nth-child(3) {
+  --crumb-x: 2px;
+  animation-delay: 0.26s;
+}
+@keyframes crumb {
+  0%,
+  32% {
+    opacity: 0;
+    transform: translate(0, 0);
+  }
+  43% {
+    opacity: 1;
+  }
+  80%,
+  100% {
+    opacity: 0;
+    transform: translate(var(--crumb-x, -6px), 17px) rotate(80deg);
+  }
+}
+.sleep-letters {
+  position: absolute;
+  top: 8%;
+  right: 12%;
+  font:
+    italic 12px Georgia,
+    serif;
+  color: #9884bd;
+  pointer-events: none;
+  animation: rising 2.5s ease-out infinite;
+}
+.behavior-body .size-label {
+  padding: 10px 0 8px;
+}
+.behavior-body .size-label input {
+  margin: 9px 0 0;
+  display: block;
+  height: 14px;
+  cursor: pointer;
+}
+.motion-room-btn,
+.dir-toggle,
+.dir-toggle button,
+.reel-slate,
+.reel-head,
+.reel-list {
+  display: flex;
+  align-items: center;
+}
+.motion-room-btn {
+  gap: 5px;
+  font-size: 11px;
+  color: #80708f;
+  background: #f6f3fa;
+  border: 1px solid #ebe5f1;
+  border-radius: 6px;
+  padding: 5px 8px;
+}
+.motion-room-btn:hover {
+  background: #eee7f9;
+  color: var(--purple);
+}
+.rehearsal {
+  height: clamp(188px, 29vh, 286px);
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  border-radius: 10px;
+  background:
+    linear-gradient(#f8f2ff1a, #fff4),
+    url('/art/terrace.webp') center bottom/cover;
+}
+.reel-figure {
+  height: 94%;
+  aspect-ratio: 352/480;
+  margin: 0 auto;
+  padding-top: 4px;
+}
+.reel-slate {
+  position: absolute;
+  top: 11px;
+  left: 10px;
+  gap: 5px;
+  font: 9px var(--mono);
+  letter-spacing: 1.2px;
+  color: white;
+  background: #494057ae;
+  padding: 5px 7px;
+  border-radius: 4px;
+}
+.rehearsal > small {
+  position: absolute;
+  bottom: 9px;
+  right: 10px;
+  font: 9px var(--mono);
+  letter-spacing: 1.4px;
+  color: white;
+  text-shadow: 0 1px 4px #343041;
+}
+.reel-head {
+  justify-content: space-between;
+  margin: 14px 0 6px;
+}
+.reel-head .eyebrow {
+  font-size: 8px;
+  letter-spacing: 1.3px;
+}
+.reel-head h3 {
+  font-size: 18px;
+  margin-top: 3px;
+}
+.dir-toggle {
+  border-radius: 7px;
+  border: 1px solid #e7e0ef;
+  padding: 2px;
+  background: #f7f5fa;
+}
+.dir-toggle button {
+  gap: 3px;
+  padding: 5px 8px;
+  border-radius: 5px;
+  font-size: 11px;
+  color: #8b8295;
+}
+.dir-toggle button[aria-pressed='true'] {
+  background: white;
+  box-shadow: 0 1px 4px #4b375120;
+  color: var(--purple);
+}
+.reel-copy {
+  font-size: 12px;
+  color: #847a8d;
+  line-height: 1.7;
+  min-height: 40px;
+}
+.reel-list {
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 10px 0 14px;
+}
+.reel-list button {
+  border-radius: 6px;
+  border: 1px solid #e8e2ee;
+  padding: 5px 8px;
+  font-size: 11px;
+  color: #756b80;
+  background: #fcfbfd;
+}
+.reel-list button[aria-pressed='true'] {
+  background: #f1eafb;
+  color: #7957b6;
+  border-color: #c5b2df;
+}
+.motion-room .footnote {
+  border-top: 1px solid var(--line);
+  padding-top: 10px;
+}
+/* Give large scales actual room, rather than silently clamping one dimension of the drawing. */
+.stage-panel:not(.expanded) .habitat {
+  min-height: max(280px, calc(225px * var(--actor-scale, 1) + 39px));
+}
+@media (max-width: 760px) {
+  .stage-panel:not(.expanded) .habitat {
+    min-height: calc(clamp(145px, 32vw, 184px) * var(--actor-scale, 1) + 39px);
+  }
 }

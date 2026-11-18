@@ -2,7 +2,7 @@ import { useSyncExternalStore } from 'react';
 import { initialState, restoreState, reduceState } from '../core/state.mjs';
 export const api = window.petdesk;
 export const RELEASE =
-  'https://github.com/TNT-THT/-second-/releases/tag/petdesk-v1.0.0';
+  'https://github.com/TNT-THT/-second-/releases/tag/petdesk-v1.1.0';
 const key = 'petdesk.studio.v1',
   listeners = new Set();
 let saved;

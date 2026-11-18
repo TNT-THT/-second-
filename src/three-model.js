@@ -1,5 +1,6 @@
 import * as T from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { matchAnimation } from '../core/performance.mjs';
 import { validateGLB } from '../core/glb.mjs';
 function load(data) {
   validateGLB(data);
@@ -36,7 +37,12 @@ export async function checkRenderable(data) {
     dispose(g.scene);
   }
 }
-export async function mountModel(canvas, data, signal) {
+export async function mountModel(
+  canvas,
+  data,
+  signal,
+  getPose = () => ({ kind: 'idle', face: 1 }),
+) {
   const gltf = await load(data);
   if (signal.aborted) {
     dispose(gltf.scene);
@@ -47,7 +53,7 @@ export async function mountModel(canvas, data, signal) {
     renderer = new T.WebGLRenderer({
       canvas,
       alpha: true,
-      preserveDrawingBuffer: !!window.petdesk,
+      preserveDrawingBuffer: false,
       antialias: true,
       powerPreference: 'low-power',
     });
@@ -65,10 +71,31 @@ export async function mountModel(canvas, data, signal) {
     size = box.getSize(new T.Vector3());
   const camera = new T.PerspectiveCamera(32, 1, 0.001, 10000);
   const mixer = new T.AnimationMixer(gltf.scene);
-  const clip =
-    gltf.animations.find((a) => /idle|stand|待机/i.test(a.name)) ??
-    gltf.animations[0];
-  if (clip) mixer.clipAction(clip).play();
+  let prevPose = '',
+    previousAction;
+  function syncClip() {
+    const { kind, face } = getPose(),
+      key = `${kind}/${face}`;
+    if (prevPose === key) return;
+    prevPose = key;
+    const { index, directional } = matchAnimation(gltf.animations, kind, face);
+    canvas.style.transform =
+      !directional && ['walk', 'climb', 'glide'].includes(kind) && face < 0
+        ? 'scaleX(-1)'
+        : '';
+    const clip = gltf.animations[index];
+    if (!clip) return;
+    const next = mixer.clipAction(clip);
+    if (previousAction === next) return;
+    next
+      .reset()
+      .setEffectiveTimeScale(1)
+      .setEffectiveWeight(1)
+      .fadeIn(0.14)
+      .play();
+    previousAction?.fadeOut(0.14);
+    previousAction = next;
+  }
   renderer.setClearColor(0x000000, 0);
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.75));
   function resize() {
@@ -94,6 +121,7 @@ export async function mountModel(canvas, data, signal) {
   function frame(t) {
     raf = requestAnimationFrame(frame);
     if (document.hidden || t - prev < 1000 / 30) return;
+    syncClip();
     mixer.update(Math.min(0.1, (t - prev) / 1000));
     prev = t;
     renderer.render(scene, camera);
