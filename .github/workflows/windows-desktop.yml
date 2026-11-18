@@ -22,6 +22,8 @@ jobs:
           Gate {python -m pip install --quiet pillow}; Gate {python tests/render_generic.py build/Release/avatar_test.exe}
           Gate {python tools/package.py build/Release/PetDesk.exe}
       - name: Probe extracted ZIP, native inputs, workbench, memory and CPU
+        env:
+          PETDESK_DIAG: "1"
         shell: powershell
         run: |
           try { & ./tests/native-probe.ps1 } catch { $msg=("$_ " + $_.ScriptStackTrace).Replace("`r",' ').Replace("`n",' '); Write-Host "::error title=Native probe::$msg"; throw }

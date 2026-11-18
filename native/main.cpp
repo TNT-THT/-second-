@@ -299,6 +299,12 @@ struct App {
     installDrop();
     if (!modelId.empty())
       switchModel(modelId, false);
+    wchar_t diag[8]{};
+    if (GetEnvironmentVariableW(L"PETDESK_DIAG", diag, 8) && view)
+      files.note(Note::models, std::string("{\"kind\":\"diag\",\"models\":") + std::to_string(models.size()) +
+                                   ",\"id\":\"" + modelId + "\",\"actor\":" +
+                                   (view->hasActor() ? "true" : "false") + ",\"trusted\":" +
+                                   (s.trusted ? "true" : "false") + "}");
     WTSRegisterSessionNotification(hwnd, NOTIFY_FOR_THIS_SESSION);
     power = RegisterPowerSettingNotification(hwnd, &GUID_CONSOLE_DISPLAY_STATE, DEVICE_NOTIFY_WINDOW_HANDLE);
     bool keys = RegisterHotKey(hwnd, 1, MOD_CONTROL | MOD_SHIFT | MOD_NOREPEAT, 'M') != 0;

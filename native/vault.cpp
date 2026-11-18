@@ -334,8 +334,8 @@ bool Vault::useModel(std::string_view rel) {
   model = {};
   activeDir.clear();
   subdirs.clear();
-  if (!root.guard || rel.empty() || rel.size() > 160 || rel.front() == '/' || rel.front() == '\\' ||
-      rel.find(':') != rel.npos || rel.find("..") != rel.npos || rel.find('\0') != rel.npos)
+  if (!root.guard || rel.empty() || rel.size() > 160 || rel.find("..") != rel.npos ||
+      rel.find('\0') != rel.npos)
     return false;
   auto w = wide(rel);
   if (diskPath(w) && w.size() <= 32760) {
@@ -347,6 +347,8 @@ bool Vault::useModel(std::string_view rel) {
     activeDir = model.path;
     return true;
   }
+  if (rel.front() == '/' || rel.front() == '\\' || rel.find(':') != rel.npos)
+    return false; // only drive-absolute paths may leave the app folder
   std::wstring path = root.path;
   size_t from = 0;
   int depth = 0;
