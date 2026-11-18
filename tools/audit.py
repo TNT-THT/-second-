@@ -24,6 +24,7 @@ def source():
     require('PROCESS_QUERY_LIMITED_INFORMATION' in (root/'native/main.cpp').read_text(),'foreground process rights not bounded')
     for rel,digest in json.loads((root/'tools/haru-lock.json').read_text()).items():
         p=root/'assets/models/haru'/rel;require(p.is_file() and hashlib.sha256(p.read_bytes()).hexdigest()==digest,'changed/missing Haru original '+rel)
+    require((root/'vendor/purism/core.c').is_file() and not (root/'vendor/purism/core.cpp').exists(),'vendored core must build as C for MSVC')
     require('FILE_APPEND_DATA' in vault and 'OPEN_ALWAYS' in vault and 'nNumberOfLinks' in vault and 'FILE_FLAG_OPEN_REPARSE_POINT' in vault,'missing confinement guards')
     cfg=json.loads((root/'config/settings.json').read_text());require(cfg=={'luogu':False,'input_counts':False,'birthday':''},'not opt-out by default')
     manifest=json.loads((root/'extension/manifest.json').read_text());origin='chrome-extension://'+''.join(chr(97+int(x,16)) for x in hashlib.sha256(base64.b64decode(manifest['key'])).hexdigest()[:32]);require(origin in (root/'native/extension_origin.hpp').read_text(),'wrong paired extension origin');require(manifest['permissions']==['storage'] and manifest['content_scripts'][0]['matches']==['https://www.luogu.com.cn/*'] and manifest['host_permissions']==['http://127.0.0.1/*'],'extension permission drift')
