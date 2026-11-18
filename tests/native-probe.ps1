@@ -68,7 +68,7 @@ public static class DeskProbe {
    if(i++<24)g_dump+=e.Current.ControlType.ProgrammaticName+":"+e.Current.Name+":"+e.Current.AutomationId+(vp!=null?"+V":"")+";";
    if(target==null&&vp!=null&&e.Current.ControlType==ControlType.Edit)target=e;
   }
-  if(target==null)foreach(AutomationElement e in all){try{var vp=(ValuePattern)e.GetCurrentPattern(ValuePattern.Pattern);if(!e.Current.IsReadOnly){target=e;break;}}catch{}}
+  if(target==null)foreach(AutomationElement e in all){try{var vp=(ValuePattern)e.GetCurrentPattern(ValuePattern.Pattern);if(!vp.Current.IsReadOnly){target=e;break;}}catch{}}
   if(target==null)return false;
   ((ValuePattern)target.GetCurrentPattern(ValuePattern.Pattern)).SetValue(file);return true;
  }
