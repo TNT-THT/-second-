@@ -338,6 +338,8 @@ bool Vault::useModel(std::string_view rel) {
       rel.find('\0') != rel.npos)
     return false;
   auto w = wide(rel);
+  // Registry entries are written with forward slashes; the Win32 layer wants separators it recognizes.
+  std::replace(w.begin(), w.end(), L'/', L'\\');
   if (diskPath(w) && w.size() <= 32760) {
     // An imported model may live outside the app folder; the user picked it explicitly and we only read it.
     auto d = directory(w);
