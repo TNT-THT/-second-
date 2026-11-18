@@ -1,0 +1,3 @@
+Sakura Motion Project / Purism Core, MIT. Commit 1069334965522df5d0b791e97f01e26b19c45456.
+https://github.com/SakuraMotion/PurismCore/tree/1069334965522df5d0b791e97f01e26b19c45456
+PurismCoreBundle.h is the unmodified output of scripts/bundle.sh at that revision. Not Live2D's proprietary Core. No sample viewer, compatibility DLL or test assets shipped from this dependency.

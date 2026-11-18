@@ -1,0 +1,9 @@
+* text=auto eol=lf
+assets/models/haru/** -text
+*.png binary
+*.moc3 binary
+*.wav binary
+*.pcm binary
+*.lut binary
+*.bgra binary
+*.onnx binary

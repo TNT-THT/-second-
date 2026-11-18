@@ -5,3 +5,14 @@ release/
 .cache/
 .DS_Store
 *.log
+build/
+.build/
+__pycache__/
+*.obj
+*.pdb
+*.exe
+*.dll
+# Never check in personal data or proprietary model/SDK payloads.
+data/*.jsonl
+assets/*.moc3
+CubismSdkForNative*/

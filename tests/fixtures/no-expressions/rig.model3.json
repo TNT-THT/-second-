@@ -1,0 +1,7 @@
+{
+  "Version": 3,
+  "FileReferences": {
+    "DisplayInfo": "rig.cdi3.json",
+    "Physics": "rig.physics3.json"
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "channels": {
+    "eye_left": ["ParamEyeLOpen", "PARAM_EYE_L_OPEN"], "eye_right": ["ParamEyeROpen","PARAM_EYE_R_OPEN"],
+    "smile_left": ["ParamEyeLSmile"], "smile_right": ["ParamEyeRSmile"],
+    "mouth_open": ["ParamMouthOpenY"], "mouth_form": ["ParamMouthForm"], "breath": ["ParamBreath"],
+    "body_roll": ["ParamBodyAngleZ"], "body_yaw": ["ParamBodyAngleX"], "head_tilt": ["ParamAngleZ","ParamHeadAngleZ"],
+    "nod": ["ParamAngleY","ParamHeadAngleY"], "gaze_x": ["ParamEyeBallX"], "gaze_y": ["ParamEyeBallY"],
+    "hand_left": ["ParamHandChangeL","ParamHandDhangeL","ParamHandL"], "hand_right": ["ParamHandChangeR","ParamHandR"],
+    "fringe": ["ParamHairFront"], "sidelock": ["ParamHairSide"], "skirt": ["ParamSkirt"]
+  },
+  "safe_operating_envelope": {"intensity":[0,1], "gaze":[0,1], "tempo":[0.7,1.3]},
+  "physics_semantics": ["fringe","sidelock","skirt"]
+}
