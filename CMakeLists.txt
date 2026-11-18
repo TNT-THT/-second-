@@ -3,6 +3,7 @@ project(PetDesk VERSION 2.0.0 LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # Portable build: no redistributable installer, unreviewed plugins or DLL search for Cubism.
+add_compile_definitions(JSON_HAS_FILESYSTEM=0 JSON_HAS_EXPERIMENTAL_FILESYSTEM=0)
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 if(MSVC)
   add_compile_options(/utf-8 /W3 /permissive- /EHsc /Gy)
