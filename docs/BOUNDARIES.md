@@ -9,7 +9,7 @@
 | 天气 | 可选**本机提供方适配器**：后台读取 `config/weather.json`，形如 `{"city":"洛杉矶","code":61}`。成功结果在 `data/weather.jsonl` 缓存 24h，失败沿用旧值。0=晴，51–67/80–82/95–99=雨。 | 没有通用的 Win32 离线城市实况天气 API。未抓取 Windows 小组件、未发定位或城市到第三方；无本机提供方就是“无数据”，不是自动联网气象查询。 |
 | 声音/输入法/色温 | WASAPI 活动播放会话、峰值间隔稳定后估拍；IME 只查语言及开关/转换模式；gamma 表在 sRGB 假设下估算白点并在 1.5s 内过渡。 | 峰值不是音乐分类，gamma 不是校色仪。受限 TSF、硬件滤蓝光或没有音频端点时可能无信号。不会截屏取色、访问候选词或循环录音。 |
 | 语音备忘 | 源代码可选 whisper.cpp 1.7.6 内存接口、显式许可、单次按住、单声道 16kHz/≤10s、取消/清零、私有哈希去重。 | 常规包**不含** Whisper；该模型的识别、内存和 CPU 尚未通过同一台机器的预算验收，不以空权重或云识别代替。开启其他感知不等于授权麦克风。 |
-| 性能/安全 | 自有代码 I/O 边界、独占锁投喂哨兵、硬链接拒绝、真实 PE 导入和清单审计；测试随每个候选包运行。仅 CPU 网格绘制，效果图集≤64×64/12帧。 | 导入扫描不是“绝对无害”证明，也不等价于 VirusTotal 检测。DWM 合成显存受机器影响。不要把一个 Windows CI 机器上的 CPU/RSS 视作所有 GPU/高 DPI 或启用 ASR 的测量。 |
+| 性能/安全 | 自有运行代码经静态检查不含 `FindFirstFile`/`FindNextFile`；工具链仍可能在导入表留下只读枚举槽，不打包也不调用目录扫描器。 自有代码 I/O 边界、独占锁投喂哨兵、硬链接拒绝、真实 PE 导入和清单审计；测试随每个候选包运行。仅 CPU 网格绘制，效果图集≤64×64/12帧。 | 导入扫描不是“绝对无害”证明，也不等价于 VirusTotal 检测。DWM 合成显存受机器影响。不要把一个 Windows CI 机器上的 CPU/RSS 视作所有 GPU/高 DPI 或启用 ASR 的测量。 |
 
 **开发复现**：CMake 3.20+，Windows 10/11 x64 + VS 2022。`cmake -S . -B build -A x64`，`cmake --build build --config Release`，`ctest --test-dir build -C Release --output-on-failure`，`python tools/package.py build/Release/PetDesk.exe`。开发 HUD 需单独 `-DPET_DEV=ON`，发行版不带其热键或状态读取。Linux 可编译规则和同一 CPU 模型内核，`python tests/render_haru.py build/avatar_test`（测试工具需要 Pillow），`python tests/compat.py`，`python tools/audit.py`。
 

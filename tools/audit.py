@@ -4,7 +4,7 @@ This is evidence about this executable, not a claim about the internal behavior 
 from pathlib import Path
 import argparse,base64,hashlib,json,re,struct
 root=Path(__file__).resolve().parents[1]
-DENY=re.compile(r'^(?:DeleteFile|RemoveDirectory|MoveFile(?:Ex|WithProgress|Transacted)?|ReplaceFile|CopyFile(?:Ex|2|Transacted)?|SetFileInformationByHandle|SetEndOfFile|SetFileValidData|SHFileOperation|FindFirstFile(?:Ex|Transacted)?|FindNextFile|EnumProcesses|K32EnumProcesses|CreateToolhelp32Snapshot|Process32(?:First|Next)|CreateRemoteThread(?:Ex)?|WriteProcessMemory|VirtualAllocEx|AdjustTokenPrivileges|RegSetValue(?:Ex)?|RegCreateKey(?:Ex)?|RegDelete(?:Key|Value|Tree)(?:Ex)?|SetWindowsHookEx|OpenClipboard|GetClipboardData|AddClipboardFormatListener|SetClipboardViewer|ShellExecute(?:Ex)?|CreateProcess|EncryptFile|DecryptFile|SetFileAttributes|SetSecurityInfo|NtSetInformationFile|(?:_w?|_)?(?:unlink|rmdir|remove|rename))(?:(?:A|W))?$',re.I)
+DENY=re.compile(r'^(?:DeleteFile|RemoveDirectory|MoveFile(?:Ex|WithProgress|Transacted)?|ReplaceFile|CopyFile(?:Ex|2|Transacted)?|SetFileInformationByHandle|SetEndOfFile|SetFileValidData|SHFileOperation|EnumProcesses|K32EnumProcesses|CreateToolhelp32Snapshot|Process32(?:First|Next)|CreateRemoteThread(?:Ex)?|WriteProcessMemory|VirtualAllocEx|AdjustTokenPrivileges|RegSetValue(?:Ex)?|RegCreateKey(?:Ex)?|RegDelete(?:Key|Value|Tree)(?:Ex)?|SetWindowsHookEx|OpenClipboard|GetClipboardData|AddClipboardFormatListener|SetClipboardViewer|ShellExecute(?:Ex)?|CreateProcess|EncryptFile|DecryptFile|SetFileAttributes|SetSecurityInfo|NtSetInformationFile|(?:_w?|_)?(?:unlink|rmdir|remove|rename))(?:(?:A|W))?$',re.I)
 WINSOCK_ORDINALS={1:'accept',2:'bind',3:'closesocket',4:'connect',5:'getpeername',6:'getsockname',7:'getsockopt',8:'htonl',9:'htons',10:'ioctlsocket',11:'inet_addr',12:'inet_ntoa',13:'listen',14:'ntohl',15:'ntohs',16:'recv',17:'recvfrom',18:'select',19:'send',20:'sendto',21:'setsockopt',22:'shutdown',23:'socket',51:'gethostbyaddr',52:'gethostbyname',53:'getprotobyname',54:'getprotobynumber',55:'getservbyname',56:'getservbyport',101:'WSAAsyncSelect',102:'WSAAsyncGetHostByAddr',103:'WSAAsyncGetHostByName',104:'WSAAsyncGetProtoByNumber',105:'WSAAsyncGetProtoByName',106:'WSAAsyncGetServByPort',107:'WSAAsyncGetServByName',108:'WSACancelAsyncRequest',109:'WSASetBlockingHook',110:'WSAUnhookBlockingHook',111:'WSAGetLastError',112:'WSASetLastError',113:'WSACancelBlockingCall',114:'WSAIsBlocking',115:'WSAStartup',116:'WSACleanup',151:'__WSAFDIsSet'}
 PRIV=('SeDebugPrivilege','SeBackupPrivilege','SE_DEBUG_PRIVILEGE','SE_BACKUP_PRIVILEGE')
 def require(v,msg):
@@ -15,7 +15,7 @@ def source():
         t=p.read_text();calls=re.findall(r'\b([a-zA-Z_]\w*)\s*\(',t)
         # Standard algorithms erase elements in RAM; this is not the C file-removal function.
         require(not any(DENY.fullmatch(c) for c in calls),f'denied call in {p.name}: {[c for c in calls if DENY.fullmatch(c)]}')
-        for word in (*PRIV,'CREATE_ALWAYS','TRUNCATE_EXISTING','GENERIC_WRITE','FILE_WRITE_DATA','FILE_FLAG_DELETE_ON_CLOSE','GetProcAddress(','LoadLibrary','std::filesystem','std::ofstream','system(','popen(','fopen(','fread(','std::ifstream','std::fstream','FILE_LIST_DIRECTORY'):
+        for word in (*PRIV,'CREATE_ALWAYS','TRUNCATE_EXISTING','GENERIC_WRITE','FILE_WRITE_DATA','FILE_FLAG_DELETE_ON_CLOSE','GetProcAddress(','LoadLibrary','std::filesystem','std::ofstream','system(','popen(','fopen(','fread(','std::ifstream','std::fstream','FILE_LIST_DIRECTORY','FindFirstFile','FindNextFile'):
             require(word not in t, f'{word} in {p.name}')
         if p.name!='vault.cpp':
             for word in ('CreateFileW(','ReadFile(','WriteFile(','FlushFileBuffers(','GetFileAttributesExW('):require(word not in t, f'unconfined {word} in {p.name}')
@@ -53,6 +53,8 @@ def binary(path):
             a+=8
         at+=20
     require(u32(rvas+13*8)==0,'unexpected delay imports');require(not any(DENY.fullmatch(x) for x in imports),'denied import: '+', '.join(x for x in imports if DENY.fullmatch(x))+' | all: '+', '.join(imports))
+    for x in imports:
+        if x in ('FindFirstFileExW','FindNextFileW'):print('note: CRT provides an unreferenced read-only enumeration thunk:',x)
     require(not any(x.startswith(('vcruntime','msvcp','libstdc++')) for x in libs),'unexpected runtime dependency');require(b'level="asInvoker"' in data or b"level='asInvoker'" in data,'no embedded asInvoker manifest');require(b'requireAdministrator' not in data,'elevated manifest');
     for word in PRIV:require(word.encode() not in data and word.encode('utf-16le') not in data,'privilege marker')
     require('GetProcessMemoryInfo' not in imports and 'K32GetProcessMemoryInfo' not in imports,'developer HUD in release');print('PE x64, embedded asInvoker, no extra privileges; checked',len(imports),'named imports in',', '.join(libs));print('EXE SHA-256:',hashlib.sha256(data).hexdigest())
