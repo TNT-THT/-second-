@@ -2,6 +2,7 @@
 #include "feed.hpp"
 #include <algorithm>
 #include <array>
+#include <shlobj.h>
 #include <shobjidl.h>
 #include <wrl/client.h>
 #include <cstdio>
@@ -393,24 +394,38 @@ std::string Vault::feedLimits() const {
   return {b.begin(), b.end()};
 }
 std::wstring Vault::recycle(std::wstring_view path, std::string_view stamp) {
-  if (path.empty() || path.size() > 32760 || !leaf(path.substr(path.rfind(L'\\') + 1)))
+  auto leafAt = path.rfind(L'\\');
+  if (path.empty() || path.size() > 32760 || leafAt == path.npos || path.find(L"..") != path.npos)
     return {};
-  const std::wstring name = wide(trashStamp(stamp, utf8(path.substr(path.rfind(L'\\') + 1))));
-  if (name.empty())
+  auto leafName = path.substr(leafAt + 1);
+  if (!leaf(leafName))
     return {};
-  ComPtr<IFileOperation> op;
-  if (FAILED(CoCreateInstance(CLSID_FileOperation, nullptr, CLSCTX_ALL, IID_PPV_ARGS(op.GetAddressOf()))))
+  const std::wstring name = wide(trashStamp(stamp, utf8(leafName)));
+  if (name.empty() || name.find(L'\\') != std::wstring::npos || name.find(L'/') != std::wstring::npos)
     return {};
-  // Undo keeps the bin entry; no prompts and no UI because the pet must never steal focus.
-  op->SetOperationFlags(FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_SILENT | FOF_NO_UI);
-  ComPtr<IShellItem> item;
-  if (FAILED(SHCreateItemFromParsingName(std::wstring(path).c_str(), nullptr, IID_PPV_ARGS(item.GetAddressOf()))))
+  // Rename first so the bin entry keeps the timestamp, then recycle the renamed item. Both steps are
+  // undoable and silent; any failure leaves the user's file untouched and the caller falls back to
+  // metadata-only feedback.
+  auto apply = [](const std::wstring &target, const wchar_t *newName) {
+    ComPtr<IFileOperation> op;
+    if (FAILED(CoCreateInstance(CLSID_FileOperation, nullptr, CLSCTX_ALL, IID_PPV_ARGS(op.GetAddressOf()))))
+      return false;
+    if (FAILED(op->SetOperationFlags(FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_SILENT | FOF_NO_UI)))
+      return false;
+    ComPtr<IShellItem> item;
+    if (FAILED(SHCreateItemFromParsingName(target.c_str(), nullptr, IID_PPV_ARGS(item.GetAddressOf()))))
+      return false;
+    HRESULT h = newName ? op->RenameItem(item.Get(), newName, nullptr) : op->DeleteItem(item.Get(), nullptr);
+    if (FAILED(h) || FAILED(op->PerformOperations()))
+      return false;
+    BOOL aborted = TRUE;
+    return SUCCEEDED(op->GetAnyOperationsAborted(&aborted)) && !aborted;
+  };
+  std::wstring original(path);
+  if (!apply(original, name.c_str()))
     return {};
-  if (FAILED(op->SetName(item.Get(), name.c_str())) || FAILED(op->DeleteItem(item.Get(), nullptr)) ||
-      FAILED(op->PerformOperations()))
-    return {};
-  BOOL aborted = TRUE;
-  if (FAILED(op->GetAnyOperationsAborted(&aborted)) || aborted)
+  auto folder = original.substr(0, leafAt);
+  if (!apply(folder + L'\\' + name, nullptr))
     return {};
   return name;
 }
