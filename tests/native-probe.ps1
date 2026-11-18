@@ -35,6 +35,9 @@ public static class DeskProbe {
  [DllImport("user32")] static extern bool PostMessage(IntPtr w,uint m,IntPtr wp,IntPtr lp);
  [DllImport("user32")] static extern bool SetForegroundWindow(IntPtr w);
  [DllImport("user32")] static extern IntPtr GetForegroundWindow();
+ [DllImport("user32")] static extern bool EnumWindows(EnumWinProc f,IntPtr l);
+ delegate bool EnumWinProc(IntPtr w,IntPtr l);
+ static IntPtr dialogOf(uint pid){IntPtr found=IntPtr.Zero;EnumWindows((h,l)=>{if(!IsWindowVisible(h))return true;var b=new StringBuilder(64);GetClassName(h,b,64);if(b.ToString()!="#32770")return true;uint q;GetWindowThreadProcessId(h,out q);if(q!=pid)return true;found=h;return false;},IntPtr.Zero);return found;}
  [DllImport("user32",CharSet=CharSet.Unicode)] static extern IntPtr SendMessageTimeout(IntPtr w,uint m,IntPtr wp,IntPtr lp,uint fl,uint to,out IntPtr res);
  [DllImport("user32")] static extern uint GetWindowThreadProcessId(IntPtr w,out uint pid);
  [DllImport("user32")] static extern bool GetGUIThreadInfo(uint thread,ref GUI gui);
@@ -78,12 +81,12 @@ public static class DeskProbe {
    P p=waist(w);SetCursorPos(p.x,p.y);wait(150);click(8);wait(160);click(16);
    if(!until(()=>FindWindow("#32768",null)!=IntPtr.Zero,2500)){why+="nomenu;";wait(400);continue;}
    if(!invokeMenu("投喂")){why+="noitem;";SendKeys.SendWait("{ESC}");wait(400);continue;}
-   IntPtr dialog=IntPtr.Zero;if(!until(()=>(dialog=FindWindow("#32770",null))!=IntPtr.Zero,9000)){why+="nodlg;";wait(500);continue;}
+   uint pid=(uint)proc.Id;IntPtr dialog=IntPtr.Zero;if(!until(()=>(dialog=dialogOf(pid))!=IntPtr.Zero,9000)){why+="nodlg;";wait(500);continue;}
    wait(1200);bool ok=false;for(int k=0;k<12&&!ok;k++){ok=setFileName(dialog,file);if(!ok)wait(350);}
    if(!ok){IntPtr f=edit(dialog);if(f!=IntPtr.Zero){SendMessage(f,0x0c,IntPtr.Zero,file);ok=true;}}
    if(!ok){why+="noedit["+g_dump+"];";PostMessage(dialog,0x10,IntPtr.Zero,IntPtr.Zero);wait(500);continue;}
    wait(250);PostMessage(dialog,0x111,(IntPtr)1,IntPtr.Zero);
-   check(until(()=>FindWindow("#32770",null)==IntPtr.Zero,6000),"picker did not accept the whitelisted path");return;
+   check(until(()=>dialogOf(pid)==IntPtr.Zero,6000),"picker did not accept the whitelisted path");return;
   }
   check(false,"no system file picker ["+why+"]");
  }
