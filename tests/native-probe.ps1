@@ -33,6 +33,7 @@ public static class DeskProbe {
  [DllImport("user32",CharSet=CharSet.Unicode)] static extern IntPtr SendMessage(IntPtr w,uint m,IntPtr wp,string text);
  [DllImport("user32")] static extern bool PostMessage(IntPtr w,uint m,IntPtr wp,IntPtr lp);
  [DllImport("user32")] static extern bool SetForegroundWindow(IntPtr w);
+ [DllImport("user32")] static extern IntPtr GetForegroundWindow();
  [DllImport("user32")] static extern uint GetWindowThreadProcessId(IntPtr w,out uint pid);
  [DllImport("user32")] static extern bool GetGUIThreadInfo(uint thread,ref GUI gui);
  [DllImport("user32")] static extern void mouse_event(uint flags,uint dx,uint dy,uint data,UIntPtr extra);
