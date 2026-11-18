@@ -52,7 +52,7 @@ def binary(path):
             else:imports.append(string(entry+2));a+=8;continue
             a+=8
         at+=20
-    require(u32(rvas+13*8)==0,'unexpected delay imports');require(not any(DENY.fullmatch(x) for x in imports),'denied import: '+', '.join(x for x in imports if DENY.fullmatch(x)))
+    require(u32(rvas+13*8)==0,'unexpected delay imports');require(not any(DENY.fullmatch(x) for x in imports),'denied import: '+', '.join(x for x in imports if DENY.fullmatch(x))+' | all: '+', '.join(imports))
     require(not any(x.startswith(('vcruntime','msvcp','libstdc++')) for x in libs),'unexpected runtime dependency');require(b'level="asInvoker"' in data or b"level='asInvoker'" in data,'no embedded asInvoker manifest');require(b'requireAdministrator' not in data,'elevated manifest');
     for word in PRIV:require(word.encode() not in data and word.encode('utf-16le') not in data,'privilege marker')
     require('GetProcessMemoryInfo' not in imports and 'K32GetProcessMemoryInfo' not in imports,'developer HUD in release');print('PE x64, embedded asInvoker, no extra privileges; checked',len(imports),'named imports in',', '.join(libs));print('EXE SHA-256:',hashlib.sha256(data).hexdigest())
