@@ -46,24 +46,18 @@ public static class DeskProbe {
  static int ht(IntPtr w,P p){return (int)SendMessage(w,0x84,IntPtr.Zero,(IntPtr)((p.x&65535)|(p.y<<16)));}
  static void click(int flag){mouse_event((uint)flag,0,0,0,UIntPtr.Zero);}
  static int rows(string p){using(var f=new FileStream(p,FileMode.Open,FileAccess.Read,FileShare.ReadWrite))using(var r=new StreamReader(f)) {int n=0;while(r.ReadLine()!=null)n++;return n;}}
- static bool menuClick(IntPtr w,string prefix,bool first=false){
-  IntPtr menu=IntPtr.Zero;if(!until(()=>(menu=FindWindow("#32768",null))!=IntPtr.Zero,3000))return false;wait(200);
-  IntPtr hm=(IntPtr)SendMessage(w,0x1e1,IntPtr.Zero,IntPtr.Zero);if(hm==IntPtr.Zero){SendKeys.SendWait("{ESC}");return false;}
-  int n=GetMenuItemCount(hm);var label=new StringBuilder(256);R r;
-  for(int i=0;i<n;i++){uint st=GetMenuState(hm,(uint)i,0x400);if(st==0xffffffff||(st&(1|2|0x800))!=0)continue;
-   label.Length=0;GetMenuStringW(hm,(uint)i,label,256,0x400);
-   if(label.ToString().StartsWith(prefix)&&GetMenuItemRect(w,hm,(uint)i,out r)){SetCursorPos((r.l+r.r)/2,(r.t+r.b)/2);wait(120);click(2);wait(120);click(4);return true;}}
-  if(first){for(int i=0;i<n;i++){uint st=GetMenuState(hm,(uint)i,0x400);if(st==0xffffffff||(st&(1|2|0x800))!=0)continue;
-   if(GetMenuItemRect(w,hm,(uint)i,out r)){SetCursorPos((r.l+r.r)/2,(r.t+r.b)/2);wait(120);click(2);wait(120);click(4);return true;}}}
-  SendKeys.SendWait("{ESC}");return false;
+ static bool openMenu(IntPtr w){
+  for(int t=0;t<3;t++){P p=waist(w);SetCursorPos(p.x,p.y);wait(150);click(8);wait(160);click(16);
+   if(until(()=>FindWindow("#32768",null)!=IntPtr.Zero,2500))return true;SendKeys.SendWait("{ESC}");wait(300);}
+  return false;
  }
  static void picker(IntPtr w,string file){
   string why="";
   for(int attempt=0;attempt<3;attempt++){
-   P p=waist(w);SetCursorPos(p.x,p.y);wait(140);click(8);wait(160);click(16);
-   bool clicked=menuClick(w,"投喂",true);why+="try"+attempt+":menu="+(FindWindow("#32768",null)!=IntPtr.Zero)+",clicked="+clicked+",fg="+cls(GetForegroundWindow())+";";
-   if(!clicked){wait(500);continue;}
-   IntPtr dialog=IntPtr.Zero;if(!until(()=>(dialog=FindWindow("#32770",null))!=IntPtr.Zero,7000)){why+="nodlg,fg="+cls(GetForegroundWindow())+";";wait(600);continue;}
+   bool opened=openMenu(w);why+="try"+attempt+":menu="+opened+";";
+   if(!opened){wait(400);continue;}
+   SendKeys.SendWait("{DOWN}");wait(300);SendKeys.SendWait("{ENTER}");
+   IntPtr dialog=IntPtr.Zero;if(!until(()=>(dialog=FindWindow("#32770",null))!=IntPtr.Zero,8000)){why+="nodlg;";SendKeys.SendWait("{ESC}");wait(500);continue;}
    SetForegroundWindow(dialog);wait(400);IntPtr field=IntPtr.Zero;
    if(!until(()=>(field=edit(dialog))!=IntPtr.Zero,3000)){SendKeys.SendWait("{ESC}");wait(400);continue;}
    SendMessage(field,0x0c,IntPtr.Zero,file);wait(180);PostMessage(dialog,0x111,(IntPtr)1,IntPtr.Zero);
@@ -79,7 +73,7 @@ public static class DeskProbe {
  form.Activate();var source=form.PointToScreen(new Point(50,50));SetCursorPos(source.X,source.Y);click(2);wait(70);p=waist(w);var move=new Thread(()=>{Thread.Sleep(250);SetCursorPos(p.x,p.y);Thread.Sleep(500);click(4);});move.Start();var food=new DataObject();food.SetData(DataFormats.FileDrop,new string[]{input});form.DoDragDrop(food,DragDropEffects.Copy);move.Join();check(until(()=>rows(log)==2,3000),"released CF_HDROP did not append second meal");check(Convert.ToBase64String(File.ReadAllBytes(input))==Convert.ToBase64String(original),"original changed");Console.WriteLine("released OS file drop passed");
  wait(4200);var center=waist(w);SetCursorPos(center.x,center.y);click(8);wait(500);SetCursorPos(center.x-35,center.y-45);wait(200);SetCursorPos(center.x-80,center.y-60);wait(150);click(16);wait(350);var after=waist(w);check(Math.Abs(after.x-center.x)>40,"real right long-drag did not move window");SendKeys.SendWait("{ESC}");wait(500);var reset=waist(w);check(Math.Abs(reset.x-center.x)<=2,"Escape did not restore bottom center");
  // The real model must have loaded: an untrusted/absent rig cannot open the opt-in confirmation.
- SetCursorPos(reset.x,reset.y);click(8);wait(120);click(16);check(until(()=>FindWindow("#32768",null)!=IntPtr.Zero,3000),"no workbench menu");check(menuClick(w,"打开陪伴工作台"),"workbench entry missing");IntPtr wb=IntPtr.Zero;check(until(()=>(wb=FindWindow("DeskCompanion.Workbench",null))!=IntPtr.Zero,3500),"workbench not visible");wait(350);
+ check(openMenu(w),"no workbench menu");SendKeys.SendWait("{DOWN}");wait(200);SendKeys.SendWait("{DOWN}");wait(200);SendKeys.SendWait("{DOWN}");wait(200);SendKeys.SendWait("{ENTER}");IntPtr wb=IntPtr.Zero;check(until(()=>(wb=FindWindow("DeskCompanion.Workbench",null))!=IntPtr.Zero,3500),"workbench not visible");wait(350);
  var screenshot=Path.Combine(folder,"workbench.png");R wr;GetWindowRect(wb,out wr);using(var image=new Bitmap(wr.r-wr.l,wr.b-wr.t)){using(var g=Graphics.FromImage(image)){var hdc=g.GetHdc();PrintWindow(wb,hdc,2);g.ReleaseHdc(hdc);}image.Save(screenshot,System.Drawing.Imaging.ImageFormat.Png);}
  SendMessage(GetDlgItem(wb,11),0xf5,IntPtr.Zero,IntPtr.Zero);wait(100);PostMessage(GetDlgItem(wb,50),0xf5,IntPtr.Zero,IntPtr.Zero);IntPtr consent=IntPtr.Zero;check(until(()=>(consent=FindWindow("#32770",null))!=IntPtr.Zero,2500),"verified Haru did not offer explicit consent");PostMessage(consent,0x111,(IntPtr)2,IntPtr.Zero);wait(120);PostMessage(GetDlgItem(wb,50),0xf5,IntPtr.Zero,IntPtr.Zero);IntPtr again=IntPtr.Zero;check(until(()=>(again=FindWindow("#32770",null))!=IntPtr.Zero,2500),"declining still enabled the intelligent module");PostMessage(again,0x111,(IntPtr)2,IntPtr.Zero);
  SendMessage(GetDlgItem(wb,13),0xf5,IntPtr.Zero,IntPtr.Zero);wait(80);SendMessage(wb,0x201,(IntPtr)1,(IntPtr)(65+(223<<16)));SendMessage(wb,0x200,(IntPtr)1,(IntPtr)(130+(260<<16)));SendMessage(wb,0x202,IntPtr.Zero,(IntPtr)(132+(261<<16)));for(int i=0;i<21;i++)SendMessage(GetDlgItem(wb,122),0xf5,IntPtr.Zero,IntPtr.Zero);check(rows(Path.Combine(folder,"data","doodles.jsonl"))==20,"physical doodle cap failed");PostMessage(wb,0x10,IntPtr.Zero,IntPtr.Zero);wait(3400);
