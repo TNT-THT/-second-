@@ -75,13 +75,13 @@ public static class DeskProbe {
   if(target==null)return false;
   ((ValuePattern)target.GetCurrentPattern(ValuePattern.Pattern)).SetValue(file);return true;
  }
- static void picker(IntPtr w,string file){
+ static void picker(IntPtr w,string file,uint pid){
   string why="";
   for(int attempt=0;attempt<3;attempt++){
    P p=waist(w);SetCursorPos(p.x,p.y);wait(150);click(8);wait(160);click(16);
    if(!until(()=>FindWindow("#32768",null)!=IntPtr.Zero,2500)){why+="nomenu;";wait(400);continue;}
    if(!invokeMenu("投喂")){why+="noitem;";SendKeys.SendWait("{ESC}");wait(400);continue;}
-   uint pid=(uint)proc.Id;IntPtr dialog=IntPtr.Zero;if(!until(()=>(dialog=dialogOf(pid))!=IntPtr.Zero,9000)){why+="nodlg;";wait(500);continue;}
+   IntPtr dialog=IntPtr.Zero;if(!until(()=>(dialog=dialogOf(pid))!=IntPtr.Zero,9000)){why+="nodlg;";wait(500);continue;}
    wait(1200);bool ok=false;for(int k=0;k<12&&!ok;k++){ok=setFileName(dialog,file);if(!ok)wait(350);}
    if(!ok){IntPtr f=edit(dialog);if(f!=IntPtr.Zero){SendMessage(f,0x0c,IntPtr.Zero,file);ok=true;}}
    if(!ok){why+="noedit["+g_dump+"];";PostMessage(dialog,0x10,IntPtr.Zero,IntPtr.Zero);wait(500);continue;}
@@ -93,7 +93,7 @@ public static class DeskProbe {
  static double sample(Process p,int ms,Action<float> drive){p.Refresh();TimeSpan old=p.TotalProcessorTime;var t=Stopwatch.StartNew();while(t.ElapsedMilliseconds<ms){if(drive!=null)drive(t.ElapsedMilliseconds/(float)ms);wait(40);}p.Refresh();return 100*(p.TotalProcessorTime-old).TotalSeconds/t.Elapsed.TotalSeconds/Environment.ProcessorCount;}
  public static string Run(string exe,string input,string scratch){SetProcessDPIAware();var form=new Form();form.Text="Ordinary desktop window";form.StartPosition=FormStartPosition.Manual;form.Location=new Point(70,80);form.Size=new Size(420,320);form.Show();form.Activate();wait(200);Process proc=Process.Start(new ProcessStartInfo(exe){WorkingDirectory=scratch,UseShellExecute=false});IntPtr w=IntPtr.Zero;try{
  check(until(()=> (w=FindWindow("DeskCompanion.Native.2",null))!=IntPtr.Zero,5000),"release window did not launch");wait(700);P p=waist(w);check(ht(w,p)==1&&ht(w,new P(p.x+32,p.y))==-1,"ellipse is not the actual 60px target");SetCursorPos(p.x,p.y);wait(100);check(WindowFromPoint(p)==w,"real cursor missed layered pet");check(WindowFromPoint(new P(p.x+90,p.y+10))!=w,"transparent padding intercepts work");
- string folder=Path.GetDirectoryName(exe),log=Path.Combine(folder,"data","feed_log.jsonl"),state=Path.Combine(folder,"data","state.jsonl");var original=File.ReadAllBytes(input);check(rows(log)==0,"nonempty feed history at first launch");picker(w,input);check(until(()=>rows(log)==1,3000),"picker did not append one real meal");Console.WriteLine("actual OS hit and system picker meal passed");
+ string folder=Path.GetDirectoryName(exe),log=Path.Combine(folder,"data","feed_log.jsonl"),state=Path.Combine(folder,"data","state.jsonl");var original=File.ReadAllBytes(input);check(rows(log)==0,"nonempty feed history at first launch");picker(w,input,(uint)proc.Id);check(until(()=>rows(log)==1,3000),"picker did not append one real meal");Console.WriteLine("actual OS hit and system picker meal passed");
  // A standard Explorer-style CF_HDROP via OLE; move the real cursor at release, not a synthetic IPC to PetDesk.
  form.Activate();var source=form.PointToScreen(new Point(50,50));SetCursorPos(source.X,source.Y);click(2);wait(70);p=waist(w);var move=new Thread(()=>{Thread.Sleep(250);SetCursorPos(p.x,p.y);Thread.Sleep(500);click(4);});move.Start();var food=new DataObject();food.SetData(DataFormats.FileDrop,new string[]{input});form.DoDragDrop(food,DragDropEffects.Copy);move.Join();check(until(()=>rows(log)==2,3000),"released CF_HDROP did not append second meal");check(Convert.ToBase64String(File.ReadAllBytes(input))==Convert.ToBase64String(original),"original changed");Console.WriteLine("released OS file drop passed");
  wait(4200);var center=waist(w);SetCursorPos(center.x,center.y);click(8);wait(500);SetCursorPos(center.x-35,center.y-45);wait(200);SetCursorPos(center.x-80,center.y-60);wait(150);click(16);wait(350);var after=waist(w);check(Math.Abs(after.x-center.x)>40,"real right long-drag did not move window");SendKeys.SendWait("{ESC}");wait(500);var reset=waist(w);check(Math.Abs(reset.x-center.x)<=2,"Escape did not restore bottom center");
