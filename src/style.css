@@ -476,7 +476,7 @@ footer > span,
 }
 .pet-node {
   position: absolute;
-  aspect-ratio: 352 / 480;
+  aspect-ratio: 232 / 252;
   cursor: grab;
   touch-action: none;
   display: flex;
@@ -622,9 +622,9 @@ footer > span,
 }
 .face img {
   width: 100%;
-  height: 110%;
-  object-fit: cover;
-  object-position: 50% 15%;
+  height: 100%;
+  object-fit: contain;
+  object-position: center;
 }
 .identity-text {
   min-width: 0;
@@ -1704,28 +1704,28 @@ html[data-surface='pet'] #root {
   transform: rotate(var(--lift-tilt, 0deg));
   transition: transform 0.16s ease-out;
 }
-.pet-node .image-adapter .avatar {
+:is(.pet-node, .audition-node) .image-adapter .avatar {
   transform: scaleX(var(--facing, 1));
 }
-.pet-node[data-pose='walk'] .image-adapter {
+:is(.pet-node, .audition-node)[data-pose='walk'] .image-adapter {
   animation: custom-step 0.54s ease-in-out infinite;
 }
-.pet-node[data-pose='climb'] .image-adapter {
+:is(.pet-node, .audition-node)[data-pose='climb'] .image-adapter {
   animation: custom-grip 0.75s ease-in-out infinite;
 }
-.pet-node[data-pose='glide'] .image-adapter {
+:is(.pet-node, .audition-node)[data-pose='hang'] .image-adapter {
   animation: custom-glide 1.7s ease-in-out infinite;
 }
-.pet-node[data-pose='play'] .image-adapter,
-.pet-node[data-pose='land'] .image-adapter {
+:is(.pet-node, .audition-node)[data-pose='play'] .image-adapter,
+:is(.pet-node, .audition-node)[data-pose='land'] .image-adapter {
   animation: custom-hop 0.7s ease-in-out infinite;
 }
-.pet-node[data-pose='eat'] .image-adapter,
-.pet-node[data-pose='pat'] .image-adapter,
-.pet-node[data-pose='notice'] .image-adapter {
+:is(.pet-node, .audition-node)[data-pose='eat'] .image-adapter,
+:is(.pet-node, .audition-node)[data-pose='pat'] .image-adapter,
+:is(.pet-node, .audition-node)[data-pose='notice'] .image-adapter {
   animation: custom-nod 0.75s ease-in-out infinite;
 }
-.pet-node[data-pose='sleep'] .image-adapter {
+:is(.pet-node, .audition-node)[data-pose='sleep'] .image-adapter {
   animation: custom-nod 3s ease-in-out infinite;
 }
 @keyframes custom-step {
@@ -1849,7 +1849,7 @@ html[data-surface='pet'] #root {
 }
 .reel-figure {
   height: 94%;
-  aspect-ratio: 352/480;
+  aspect-ratio: 232/252;
   margin: 0 auto;
   padding-top: 4px;
 }
@@ -1940,4 +1940,338 @@ html[data-surface='pet'] #root {
   .stage-panel:not(.expanded) .habitat {
     min-height: calc(clamp(145px, 32vw, 184px) * var(--actor-scale, 1) + 39px);
   }
+}
+/* Pocket edition: the same uncropped vector rig is used at every DPI. */
+.qwen-actor,
+.qwen-actor > svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+.pet-node,
+.reel-figure {
+  aspect-ratio: 232/252;
+}
+.practice-ledge {
+  pointer-events: none;
+  position: absolute;
+  border-top: 2px solid #715d93;
+  box-shadow: 0 2px 0 #ffffffa9;
+  height: 12px;
+  border-radius: 2px;
+  background: linear-gradient(#ece5f4d9, #f8f4f5a8);
+}
+.practice-ledge span {
+  position: absolute;
+  right: 7px;
+  top: 0;
+  font-size: 8px;
+  letter-spacing: 1px;
+  color: #695778;
+}
+.shelf-btn,
+.handbook-link,
+.clip-permission span,
+.book-caption {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.shelf-btn {
+  font-size: 10px;
+  color: #766889;
+  margin-left: auto;
+  border: 1px solid #e8e1ed;
+  border-radius: 5px;
+  padding: 3px 7px;
+  background: #fcfbfe;
+}
+.shelf-btn[aria-pressed='true'] {
+  background: #eee9f9;
+}
+.handbook-link {
+  font-size: 12px;
+  color: var(--purple);
+  padding: 8px 0;
+}
+.handbook-link svg:last-child {
+  margin-left: auto;
+}
+.handbook-link,
+.route-picker,
+.leisure-picker {
+  width: 100%;
+}
+.route-tabs {
+  display: flex;
+  border: 1px solid #e8e2ee;
+  border-radius: 8px;
+  padding: 3px;
+  background: #f6f4f8;
+  gap: 3px;
+}
+.route-tabs button {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 6px 8px;
+  font-size: 12px;
+  color: #81778b;
+  border-radius: 6px;
+}
+.route-tabs button[aria-pressed='true'] {
+  background: white;
+  box-shadow: 0 1px 4px #4b375124;
+  color: #7056a2;
+}
+.route-picker small,
+.leisure-picker small,
+.custom-note {
+  display: block;
+  color: #827a8a;
+  font-size: 11px;
+  line-height: 1.6;
+  margin-top: 6px;
+}
+.interact.chat {
+  color: #626e99;
+  background: #f4f5fc;
+}
+.interact:disabled,
+button:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+.model-thumb.qwen-lilac {
+  background-blend-mode: luminosity;
+  background-color: #d9cbe8;
+}
+.model-thumb.garden > .avatar {
+  filter: drop-shadow(0 2px 3px #4b38552a);
+}
+.action-row {
+  flex-wrap: wrap;
+}
+.action-row .interact {
+  flex: 1 1 auto;
+  padding: 8px 5px;
+  gap: 4px;
+}
+.handbook {
+  color: #42394f;
+}
+.full-book {
+  display: grid;
+  grid-template-columns: minmax(280px, 0.93fr) minmax(280px, 1.07fr);
+  gap: 18px;
+}
+.book-player,
+.book-index,
+.book-schedule {
+  background: white;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  overflow: hidden;
+}
+.book-player .rehearsal {
+  margin: 10px;
+  border-radius: 9px;
+  height: clamp(190px, 26vh, 286px);
+}
+.book-player .reel-figure {
+  padding-top: 5px;
+  height: 97%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.book-copy {
+  padding: 8px 17px 16px;
+}
+.reel-head {
+  margin: 4px 0 6px;
+}
+.reel-copy {
+  min-height: 0;
+}
+.clip-permission {
+  border-top: 1px solid var(--line);
+  padding-top: 10px;
+  margin-top: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 30px;
+}
+.clip-permission span {
+  font-size: 12px;
+  color: #776d87;
+}
+.book-index,
+.book-schedule {
+  padding: 18px 20px;
+}
+.book-caption {
+  gap: 8px;
+}
+.book-caption > svg {
+  color: #8367aa;
+}
+.book-caption b {
+  font-size: 16px;
+}
+.book-caption small {
+  font: 9px var(--mono);
+  letter-spacing: 1.6px;
+  margin-left: auto;
+  color: #9a8da6;
+}
+.take-group {
+  display: grid;
+  grid-template-columns: 34px 1fr;
+  gap: 6px;
+  margin: 18px 0;
+}
+.take-group strong {
+  font-size: 11px;
+  color: #9b8d9f;
+  padding-top: 6px;
+}
+.take-group > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.take-group button {
+  font-size: 12px;
+  background: #fbfafc;
+  border: 1px solid #e9e4ef;
+  padding: 6px 9px;
+  border-radius: 7px;
+  color: #746a7d;
+}
+.take-group button[aria-pressed='true'] {
+  background: #efe7f8;
+  color: #7956a4;
+  border-color: #cbb5e1;
+}
+.take-group button.off {
+  color: #a7a0ab;
+}
+.take-group i {
+  font-size: 8px;
+  padding-left: 4px;
+}
+.book-tip {
+  font-size: 11px;
+  line-height: 1.65;
+  color: #8f8399;
+  border-top: 1px solid var(--line);
+  padding-top: 11px;
+}
+.book-schedule {
+  grid-column: 1/-1;
+}
+.schedule-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 28px;
+  margin-top: 16px;
+}
+.schedule-grid h4 {
+  font-size: 12px;
+  margin: 0 0 8px;
+}
+.leisure-picker select {
+  width: 100%;
+  border: 1px solid #e3dcea;
+  border-radius: 8px;
+  padding: 9px;
+  color: #5f506e;
+  background: #fbf9fd;
+  font: inherit;
+  font-size: 12px;
+}
+.compact-book .book-player,
+.compact-book .book-index {
+  border: 0;
+  border-radius: 0;
+}
+.compact-book .book-player .rehearsal {
+  margin: 0;
+  height: clamp(148px, 22vh, 216px);
+}
+.compact-book .book-copy,
+.compact-book .book-index {
+  padding: 10px 0;
+}
+.compact-book .take-group {
+  margin: 8px 0;
+}
+.compact-book .take-group button {
+  padding: 4px 6px;
+  font-size: 11px;
+}
+.compact-book .book-caption {
+  display: none;
+}
+.compact-book .book-tip {
+  margin-bottom: 0;
+}
+.practice-ledge ~ .pet-node {
+  z-index: 1;
+}
+.book-player .eyebrow {
+  letter-spacing: 1.7px;
+  font-size: 9px;
+}
+@media (max-width: 760px) {
+  .full-book,
+  .schedule-grid {
+    grid-template-columns: 1fr;
+  }
+  .book-schedule {
+    grid-column: auto;
+  }
+  .stage-foot .quiet-status {
+    display: none;
+  }
+  .top-inner nav {
+    gap: 1px;
+  }
+  .take-group {
+    margin: 12px 0;
+  }
+  .schedule-grid {
+    gap: 14px;
+  }
+}
+
+.guide-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+.snack-receipt {
+  margin: 15px 0 12px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  color: #877b91;
+  font-size: 10px;
+}
+.snack-receipt span {
+  background: #f8f5fa;
+  border: 1px solid #eee8f1;
+  border-radius: 5px;
+  padding: 4px 7px;
+}
+.snack-receipt i {
+  color: #baadc3;
+}
+.feed-body .footnote {
+  line-height: 1.6;
 }

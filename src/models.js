@@ -1,3 +1,4 @@
+import { hasFlightClip } from '../core/repertoire.mjs';
 import { MAX_MODEL, validateGLB } from '../core/glb.mjs';
 let dbPromise;
 function db() {
@@ -19,25 +20,42 @@ async function request(mode, run) {
       reject(Error('模型库写入失败或存储空间不足。'));
   });
 }
-export const getModel = (id) => request('readonly', (s) => s.get(id));
-export const listModels = () => request('readonly', (s) => s.getAll());
+async function migrate(r) {
+  if (r?.kind === 'glb' && typeof r.flyClip !== 'boolean') {
+    try {
+      r.flyClip = hasFlightClip(
+        validateGLB(await r.blob.arrayBuffer()).animations,
+      );
+    } catch {
+      r.flyClip = false;
+    }
+    await request('readwrite', (s) => s.put(r));
+  }
+  return r;
+}
+export const getModel = async (id) =>
+  migrate(await request('readonly', (s) => s.get(id)));
+export const listModels = async () =>
+  Promise.all((await request('readonly', (s) => s.getAll())).map(migrate));
 export const removeModel = (id) => request('readwrite', (s) => s.delete(id));
 export async function importModel(file) {
   if (!file || file.size < 1 || file.size > MAX_MODEL)
     throw Error('模型需大于 0 字节且不超过 24 MB。');
-  let kind = 'image',
+  let thumb = null,
+    flyClip = false,
+    kind = 'image',
     blob,
     ext = file.name.split('.').pop().toLowerCase();
   const a = await file.arrayBuffer(),
     b = new Uint8Array(a),
     str = (i, n) => String.fromCharCode(...b.slice(i, i + n));
   if (ext === 'glb') {
-    validateGLB(a);
+    flyClip = hasFlightClip(validateGLB(a).animations);
     kind = 'glb';
     blob = new Blob([a], { type: 'model/gltf-binary' });
     // Verify that Three can actually parse it before replacing the current companion.
     const { checkRenderable } = await import('./three-model.js');
-    await checkRenderable(a);
+    thumb = await checkRenderable(a);
   } else {
     const mime =
       ext === 'png' && b[0] === 137 && str(1, 3) === 'PNG'
@@ -72,6 +90,8 @@ export async function importModel(file) {
         .trim()
         .slice(0, 40) || '新伙伴',
     kind,
+    flyClip,
+    thumb,
     ext: ext.toUpperCase(),
     size: blob.size,
     blob,

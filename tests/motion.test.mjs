@@ -3,162 +3,270 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import {
   Wander,
-  STILL,
   actorSize,
-  resizeAnchored,
   contains,
+  resizeAnchored,
   FRAME_ASPECT,
+  PET_HEIGHT,
+  STRIDE,
+  platformSpan,
 } from '../core/motion.mjs';
 import { performanceFor, matchAnimation } from '../core/performance.mjs';
-const area = { x: -800, y: -120, width: 800, height: 540 },
-  size = actorSize(1, area);
-test('one uniform scale for the native hit window and the image, including display fit', () => {
-  for (const p of [0.6, 1, 1.25, 1.6]) {
-    const s = actorSize(p, area);
-    assert.ok(Math.abs(s.height - 218 * p) <= 0.5);
-    assert.ok(Math.abs(s.width / s.height - FRAME_ASPECT) < 0.005);
+import {
+  BUILTINS,
+  clips,
+  canFly,
+  hasFlightClip,
+  motionOptions,
+} from '../core/repertoire.mjs';
+import { initialState, reduceState, restoreState } from '../core/state.mjs';
+import { drawChibi, poseAt } from '../art-src/chibi/puppet.mjs';
+const area = { x: -800, y: 0, width: 800, height: 650 },
+  size = actorSize(1, area),
+  bottom = area.height - size.height,
+  L = { id: 'foreground', x: -665, y: 390, width: 410 };
+const make = (x = -532, y = bottom, opts = {}) =>
+  new Wander({ x, y }, area, size, { wait: 0, rng: () => 0.3, ...opts });
+const frames = (w, n, o = {}) =>
+  Array.from({ length: n }, () => w.step(1 / 30, o));
+test('proportional live hit rectangle fits work area, anchors feet and counts the transparent corner', () => {
+  for (const scale of [0.6, 1, 1.35, 1.6]) {
+    const s = actorSize(scale, area);
+    assert.ok(Math.abs(s.height - PET_HEIGHT * scale) <= 0.5);
+    assert.ok(Math.abs(s.width / s.height - FRAME_ASPECT) < 0.006);
   }
-  const s = actorSize(1.6, { width: 50, height: 40 });
-  assert.ok(s.width <= 50 && s.height <= 40);
-  assert.equal(s.height, 40);
-  const b = { x: -200, y: 20, width: 100, height: 120 };
+  assert.equal(actorSize(1.6, { width: 40, height: 30 }).height, 30);
+  assert.ok(contains({ x: -100, y: 20, ...size }, { x: -100, y: 20 }));
+  assert.ok(!contains({ x: -100, y: 20, ...size }, { x: -101, y: 20 }));
   assert.equal(
-    resizeAnchored(b, { width: 160, height: 190 }, area, 'floor').y + 190,
-    140,
-  );
-  assert.equal(
-    resizeAnchored(b, { width: 160, height: 190 }, area, 'right').x + 160,
-    -100,
-  );
-  assert.equal(
-    resizeAnchored(b, { width: 160, height: 190 }, area, 'top').y,
-    20,
-  );
-});
-test('whole compact hit rectangle: borders count, outside desktop does not', () => {
-  const b = { x: -200, y: -50, ...size };
-  for (const [x, y] of [
-    [0, 0],
-    [1, 1],
-    [size.width - 1, size.height - 1],
-  ])
-    assert.ok(contains(b, { x: b.x + x, y: b.y + y }));
-  assert.equal(contains(b, { x: b.x + size.width, y: b.y + 1 }), false);
-});
-test('actual route walks to a wall, climbs, glides at the top and descends, with no diagonal skating', () => {
-  const w = new Wander(
-      { x: area.x + 300, y: area.y + area.height - size.height },
-      area,
+    resizeAnchored(
+      { x: -550, y: 25, width: 100, height: 150 },
       size,
-      { wait: 0, rng: () => 0.3, surface: 'floor' },
-    ),
-    seen = new Set();
-  let down = false;
-  for (let i = 0; i < 2800; i++) {
-    const old = { ...w.pos },
-      m = w.step(0.033);
-    const dx = w.pos.x - old.x,
-      dy = w.pos.y - old.y;
-    assert.ok(!(Math.abs(dx) > 0.001 && Math.abs(dy) > 0.001));
-    assert.ok(
-      w.pos.x >= w.l && w.pos.x <= w.r && w.pos.y >= w.t && w.pos.y <= w.b,
-    );
-    if (!m.moving) continue;
-    seen.add(m.kind);
-    if (m.kind === 'walk') assert.equal(m.face, Math.sign(dx));
-    if (m.kind === 'climb') {
-      assert.ok(w.pos.x === w.l || w.pos.x === w.r);
-      assert.equal(dx, 0);
-      if (dy > 0) down = true;
+      area,
+      'window',
+    ).y + size.height,
+    175,
+  );
+});
+test('air release falls while hovered, sleeping or parked; no landing before contact or tunneling', () => {
+  const w = make(-530, 90);
+  assert.equal(w.track().kind, 'fall');
+  let prev = w.pos.y,
+    land = 0;
+  for (let i = 0; i < 60; i++) {
+    const st = w.step(0.04, { roam: false, blocked: true });
+    assert.ok(w.pos.y >= prev && w.pos.y <= bottom);
+    if (st.kind === 'land') {
+      assert.equal(w.pos.y, bottom);
+      land++;
     }
-    if (m.kind === 'glide') assert.equal(w.pos.y, w.t);
-    assert.ok(m.phase >= 0 && m.phase < 1);
+    prev = w.pos.y;
   }
-  assert.deepEqual([...seen].sort(), ['climb', 'glide', 'walk']);
-  assert.ok(down);
+  assert.ok(land >= 6);
+  assert.equal(w.surface, 'floor');
+  assert.equal(w.track().kind, 'idle');
 });
-test('dropping close to either side or ceiling attaches there; stopping cannot advance a footprint', () => {
-  const r = new Wander({ x: -401, y: 0 }, area, size);
-  const p = r.place({ x: r.l + 3, y: 0 }, area, size, { snap: true, wait: 0 });
-  assert.equal(p.x, r.l);
-  assert.equal(r.track().face, -1);
-  assert.equal(r.track().kind, 'climb');
-  const m = r.step(0.06),
-    after = { ...r.pos };
-  for (let i = 0; i < 15; i++)
-    assert.equal(r.step(0.09, { blocked: true }).phase, m.phase);
-  assert.deepEqual(after, r.pos);
-  r.place({ x: r.r - 2, y: 0 }, area, size, { snap: true });
-  assert.equal(r.surface, 'right');
-  r.place({ x: r.l + 80, y: r.t + 4 }, area, size, { snap: true });
-  assert.equal(r.track().kind, 'glide');
-  assert.equal(r.pos.y, r.t);
-  r.step(0.03, { edges: false, roam: false });
-  assert.equal(r.surface, 'floor');
-});
-test('stride phase depends on traveled distance at current scale, not elapsed animation time', () => {
-  const w = new Wander({ x: -500, y: 110 }, area, size, {
-    wait: 0,
-    rng: () => 0.3,
-    surface: 'floor',
-  });
-  const from = w.pos.x,
-    m = w.step(0.04);
+test('one-way visible window top catches feet, moves with its host, releases on removal', () => {
+  const w = make(-520, 50);
+  const at = frames(w, 40, { ledge: L, roam: false });
+  assert.ok(at.some((t) => t.kind === 'land' && t.surface === 'window'));
+  assert.equal(w.pos.y + size.height, L.y);
+  const old = w.pos.x;
+  const L2 = { ...L, x: L.x - 30, y: L.y + 13 };
+  w.step(0.03, { ledge: L2, blocked: true });
+  assert.equal(w.pos.x, old - 30);
+  assert.equal(w.pos.y + size.height, L2.y);
   assert.ok(
-    Math.abs(
-      m.phase -
-        Math.abs(w.pos.x - from) / ((size.height * 4 * 87 * 0.39) / 480),
-    ) < 1e-8,
+    frames(w, 150, { ledge: L2 }).some(
+      (t) => t.kind === 'walk' && t.surface === 'window',
+    ),
   );
-  assert.equal(w.step(0.05, { roam: false }).phase, m.phase);
+  const span = platformSpan(L2, area, size);
+  assert.ok(w.pos.x >= span.l && w.pos.x <= span.r);
+  assert.equal(w.step(0.033, { roam: false }).kind, 'fall');
+  frames(w, 90);
+  assert.equal(w.surface, 'floor');
 });
-test('file hover and cancel are not eating; pickup, successful meal and manual reactions override travel', () => {
-  const v = { track: { ...STILL, kind: 'walk' } };
-  assert.equal(performanceFor({ ...v, offer: true }), 'notice');
-  assert.equal(performanceFor({ ...v, held: true }), 'held');
-  assert.equal(performanceFor({ ...v, landing: true }), 'land');
-  assert.equal(performanceFor({ ...v, reaction: { kind: 'eat' } }), 'eat');
-  assert.equal(performanceFor(v), 'walk');
-  assert.equal(performanceFor({ ...v, sleeping: true }), 'sleep');
-  assert.equal(performanceFor({ ...v, hover: true }), 'notice');
-});
-test('imported GLB actions select direction-specific clips, named actions and an idle fallback', () => {
-  const clips = [
-    'Idle',
-    'Walk_Left',
-    'Walk-Right',
-    'Eating',
-    'Drag',
-    'FanDance',
-    'Climbing',
-  ].map((name) => ({ name }));
-  for (const [k, f, i] of [
-    ['walk', -1, 1],
-    ['walk', 1, 2],
-    ['eat', 1, 3],
-    ['held', 1, 4],
-    ['play', 1, 5],
-    ['climb', -1, 6],
-    ['glide', 1, 0],
-  ])
-    assert.equal(matchAnimation(clips, k, f).index, i);
-  assert.equal(matchAnimation([], 'idle').index, -1);
-});
-test('all authored performance atlases contain the advertised number of complete frames', () => {
-  const manifest = JSON.parse(
-    fs.readFileSync(new URL('../core/qwen-atlas.json', import.meta.url)),
-  );
-  assert.equal(Object.keys(manifest).length, 11);
-  for (const [k, m] of Object.entries(manifest)) {
-    const b = fs.readFileSync(
-      new URL(`../public/art/motion/${k}.webp`, import.meta.url),
-    );
-    assert.equal(b.toString('ascii', 12, 16), 'VP8X');
-    assert.equal(1 + b.readUIntLE(24, 3), m.width * m.cols);
-    assert.equal(
-      1 + b.readUIntLE(27, 3),
-      m.height * Math.ceil(m.frames / m.cols),
-    );
-    assert.ok(m.frames >= 12 && m.seconds > 0);
+test('does not teleport up onto a window above the feet or outside its horizontal span', () => {
+  for (const [x, y] of [
+    [-770, 260],
+    [-180, 5],
+    [-510, 240],
+  ]) {
+    const w = make(x, y);
+    frames(w, 90, { ledge: L, roam: false });
+    assert.equal(w.pos.y, bottom);
+    assert.equal(w.surface, 'floor');
   }
+  assert.equal(platformSpan({ ...L, y: 10 }, area, size), null);
+});
+test('ground mode walks both directions, climbs and traverses the ceiling with a grip, never flies', () => {
+  for (const [rnd, dir] of [
+    [0.3, 1],
+    [0.1, -1],
+  ]) {
+    const w = make(-531, bottom, { rng: () => rnd });
+    const first = w.step(0.04);
+    assert.equal(first.face, dir);
+    assert.equal(first.kind, 'walk');
+    assert.ok(
+      Math.abs(first.phase - Math.abs(w.pos.x + 531) / (size.height * STRIDE)) <
+        1e-7,
+    );
+    const seen = new Set();
+    for (let i = 0; i < 4000; i++) {
+      const old = { ...w.pos },
+        t = w.step(0.042);
+      seen.add(t.kind);
+      assert.ok(
+        !(Math.abs(old.y - w.pos.y) > 0.01 && Math.abs(old.x - w.pos.x) > 0.01),
+      );
+      if (t.kind === 'hang') assert.equal(w.pos.y, 0);
+    }
+    assert.ok(seen.has('climb') && seen.has('hang') && !seen.has('fly'));
+  }
+});
+test('release can latch to an allowed edge; denying the edge forces descent, not a stationary walk', () => {
+  const w = make();
+  w.place({ x: w.r - 3, y: 33 }, area, size, { snap: true, release: true });
+  assert.equal(w.surface, 'right');
+  assert.equal(
+    w.step(0.033, { disabled: ['climb'], roam: false }).kind,
+    'fall',
+  );
+  w.place({ x: w.l + 90, y: 3 }, area, size, { snap: true });
+  assert.equal(w.track().kind, 'hang');
+  assert.equal(w.step(0.03, { edges: false, blocked: true }).kind, 'fall');
+});
+test('only explicit flight can hold an arbitrary point in air; two-axis roam, disable even during hover', () => {
+  const w = make();
+  w.place({ x: -510, y: 128 }, area, size, {
+    flight: true,
+    release: true,
+    wait: 0,
+  });
+  frames(w, 20, { roam: false, flight: true });
+  assert.deepEqual(w.pos, { x: -510, y: 128 });
+  assert.equal(w.track().kind, 'fly');
+  frames(w, 10, { flight: true });
+  assert.ok(w.pos.x !== -510 && w.pos.y !== 128);
+  const st = w.step(0.035, { flight: true, disabled: ['fly'], blocked: true });
+  assert.equal(st.kind, 'fall');
+  frames(w, 120, { flight: true, disabled: ['fly'], roam: false });
+  assert.equal(w.surface, 'floor');
+});
+test('stationary leisure respects preferred activity, quiet, and in-progress revocation', () => {
+  for (const k of ['read', 'tea', 'play']) {
+    const w = make();
+    assert.ok(
+      frames(w, 150, { roam: false, leisure: k }).some((t) => t.kind === k),
+    );
+    assert.notEqual(
+      w.step(0.04, { leisure: k, roam: false, disabled: [k] }).kind,
+      k,
+    );
+    assert.ok(
+      frames(w, 600, { leisure: 'quiet', roam: false }).every(
+        (t) => t.kind === 'idle',
+      ),
+    );
+  }
+});
+test('gravity/flight poses have priority, disabling a reaction does not undo the event', () => {
+  for (const k of ['fall', 'land', 'fly', 'climb', 'hang']) {
+    assert.equal(
+      performanceFor({
+        track: { kind: k },
+        hover: true,
+        reaction: { kind: 'pat' },
+      }),
+      k,
+    );
+  }
+  const v = { track: { kind: 'walk' } };
+  assert.equal(performanceFor({ ...v, held: true }), 'held');
+  assert.equal(performanceFor({ ...v, offer: true }), 'notice');
+  assert.equal(
+    performanceFor({
+      ...v,
+      reaction: { kind: 'eat' },
+      prefs: { disabledClips: ['eat'] },
+    }),
+    'idle',
+  );
+});
+test('GLB flight is a real named clip, not the idle fallback; disabled clips never used as fallback', () => {
+  assert.ok(hasFlightClip([{ name: 'Wing_FlightLoop' }]));
+  assert.ok(!hasFlightClip([{ name: 'ButterflyDance' }]));
+  const cs = ['Float', 'Idle', 'Walk_Left', 'WalkRight', 'Read'].map(
+    (name) => ({ name }),
+  );
+  assert.equal(matchAnimation(cs, 'fly').index, 0);
+  assert.equal(matchAnimation(cs, 'walk', -1).index, 2);
+  assert.equal(matchAnimation(cs, 'walk', 1).index, 3);
+  assert.equal(matchAnimation(cs, 'read', 1, ['read']).index, 1);
+  assert.equal(matchAnimation([cs[0]], 'idle', 1, ['fly']).index, -1);
+  assert.equal(matchAnimation([cs[1]], 'fly').index, -1);
+  assert.ok(!canFly({ kind: 'image', flyClip: true }));
+});
+test('all 15 actions share an articulated rig; both built-in cards and portraits are exact exports, not old bitmaps', () => {
+  assert.equal(Object.keys(clips).length, 15);
+  for (const { id } of BUILTINS) {
+    for (const portrait of [false, true]) {
+      const svg = fs.readFileSync(
+        new URL(
+          `../public/art/${id}${portrait ? '-face' : ''}.svg`,
+          import.meta.url,
+        ),
+        'utf8',
+      );
+      assert.equal(svg.trim(), drawChibi({ skin: id, portrait }));
+      assert.ok(!/<image|<script/.test(svg));
+    }
+    for (const k of Object.keys(clips)) {
+      const a = poseAt(k, 0.15),
+        b = poseAt(k, 0.4, -1);
+      assert.ok(!JSON.stringify(a).includes('NaN'));
+      assert.notDeepEqual({ ...a, mirror: '' }, { ...b, mirror: '' });
+    }
+  }
+});
+test('model/permission changes turn off the actual flight mode and migrate prior preferences', () => {
+  const act = (s, type, rest) => reduceState(s, { type, ...rest });
+  let s = initialState();
+  s = act(s, 'pref', { key: 'flight', value: true });
+  assert.equal(motionOptions(s).flight, true);
+  s = act(s, 'animation', { key: 'fly', enabled: false });
+  assert.equal(motionOptions(s).flight, false);
+  assert.equal(act(s, 'pref', { key: 'flight', value: true }), s);
+  s = restoreState(s);
+  assert.ok(s.prefs.disabledClips.includes('fly'));
+  s = act(s, 'animation', { key: 'fly', enabled: true });
+  assert.equal(s.prefs.flight, false);
+  s = act(s, 'pref', { key: 'flight', value: true });
+  s = act(s, 'select', {
+    model: { id: 'local-image', name: '小花', kind: 'image' },
+  });
+  assert.equal(s.prefs.flight, false);
+  assert.equal(act(s, 'animation', { key: 'fall', enabled: false }), s);
+  let t = restoreState({
+    version: 1,
+    model: { id: 'qwen', name: '旧版', kind: 'illustration' },
+    prefs: { scale: 1.4 },
+  });
+  assert.equal(t.model.edition, '花庭蓝');
+  assert.equal(t.prefs.scale, 1.4);
+  assert.equal(t.prefs.flight, false);
+});
+test('authored phrases cycle separately, survive restart, meals still count when eating animation is muted', () => {
+  let s = initialState(),
+    lines = new Set();
+  for (let i = 0; i < 6; i++) {
+    s = reduceState(s, { type: 'chat' });
+    lines.add(s.reaction.text);
+    s = restoreState(reduceState(s, { type: 'pat' }));
+  }
+  assert.equal(lines.size, 6);
+  s = reduceState(s, { type: 'animation', key: 'eat', enabled: false });
+  assert.equal(reduceState(s, { type: 'meal' }).meals, 1);
 });

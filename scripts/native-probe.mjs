@@ -108,6 +108,25 @@ async function run() {
   );
   await evalIn(pet, "window.petdesk.act({type:'pref',key:'roam',value:false})");
   await until(() => pet.isVisible(), 'pet window visible');
+  // Capture only our disposable pet renderer, never another app or the screen.
+  const frame = await pet.webContents.capturePage(),
+    pixels = frame.toBitmap();
+  let opaque = 0,
+    blue = 0;
+  for (let i = 0; i < pixels.length; i += 4) {
+    if (pixels[i + 3] > 180) {
+      opaque++;
+      if (pixels[i] > pixels[i + 2] + 10) blue++;
+    }
+  }
+  assert.ok(
+    opaque > (pixels.length / 4) * 0.18 && opaque < (pixels.length / 4) * 0.88,
+    'visible colored character on a transparent backing',
+  );
+  assert.ok(blue > (pixels.length / 4) * 0.025, 'actual blue costume pixels');
+  log(
+    'PASS: native renderer drew a nonempty colored chibi with transparent margins',
+  );
   if (process.env.GITHUB_ACTIONS === 'true' && process.platform === 'win32') {
     const b = pet.getBounds(),
       center = {
@@ -152,15 +171,149 @@ async function run() {
       () =>
         evalIn(
           pet,
-          "document.querySelector('.qwen-actor')?.dataset.clip==='glide'",
+          "document.querySelector('.qwen-actor')?.dataset.clip==='hang'",
         ),
-      'ceiling fan traverse',
+      'non-flying ceiling grip',
     );
     assert.equal(pet.getBounds().y, area.y);
-    log('PASS: real pickup/drag, right-wall climb and top-edge fan traverse');
+    log('PASS: real pickup/drag, right-wall climb and non-flying ceiling grip');
     await evalIn(
       pet,
       "window.petdesk.act({type:'pref',key:'roam',value:false})",
+    );
+  }
+  if (process.env.GITHUB_ACTIONS === 'true' && process.platform === 'win32') {
+    // A separate, ordinary framed OS window. Do not pass its geometry to the product.
+    // The shipping read-only helper must discover it as foreground on its own.
+    const b = pet.getBounds(),
+      area = screen.getDisplayMatching(b).workArea,
+      width = Math.floor(area.width * 0.46),
+      height = 100;
+    const fixture = new BrowserWindow({
+      title: 'Disposable ledge',
+      x: area.x + Math.floor(area.width * 0.16),
+      y:
+        area.y +
+        Math.min(
+          area.height - height - 40,
+          b.height + Math.floor(area.height * 0.3),
+        ),
+      width,
+      height,
+      show: false,
+      webPreferences: { sandbox: true, nodeIntegration: false },
+    });
+    await fixture.loadURL(
+      'data:text/html,<title>Ledge</title><p>Disposable window frame</p>',
+    );
+    fixture.show();
+    fixture.focus();
+    await until(() => fixture.isFocused(), 'ordinary foreground fixture');
+    await evalIn(
+      pet,
+      `(()=>{window.motionTrace=[];window.petdesk.onMotion(m=>{const k=m.surface+':'+m.kind;if(window.motionTrace.at(-1)!==k)window.motionTrace.push(k);});})()`,
+    );
+    const f = fixture.getBounds(),
+      origin = {
+        x: b.x + Math.floor(b.width / 2),
+        y: b.y + Math.floor(b.height / 2),
+      },
+      dest = {
+        x: f.x + Math.floor(f.width / 2),
+        y: f.y - Math.ceil(b.height / 2) - 88,
+      };
+    await hitProbe(pet, origin, dest, 'drag');
+    const onWindow = () =>
+      evalIn(
+        pet,
+        "document.querySelector('.pet-node')?.dataset.surface==='window'",
+      );
+    await until(onWindow, 'fall onto foreground window frame');
+    assert.ok(Math.abs(pet.getBounds().y + b.height - f.y) < 10);
+    const hist = await evalIn(pet, 'window.motionTrace');
+    assert.ok(
+      hist.indexOf('fall:fall') >= 0 &&
+        hist.indexOf('window:land') > hist.indexOf('fall:fall'),
+      String(hist),
+    );
+    const start = pet.getBounds();
+    await evalIn(
+      pet,
+      "window.petdesk.act({type:'pref',key:'roam',value:true})",
+    );
+    await until(
+      () => Math.abs(pet.getBounds().x - start.x) > 7,
+      'walking along the actual window',
+    );
+    assert.ok(await onWindow());
+    await evalIn(
+      pet,
+      "window.petdesk.act({type:'pref',key:'roam',value:false})",
+    );
+    const pre = pet.getBounds();
+    fixture.setPosition(f.x + 18, f.y + 15, false);
+    await until(
+      () => Math.abs(pet.getBounds().y - pre.y - 15) < 4,
+      'support follows moved window',
+    );
+    fixture.close();
+    await until(
+      () =>
+        evalIn(
+          pet,
+          "document.querySelector('.pet-node')?.dataset.surface!=='window'",
+        ),
+      'closed foreground window releases pet',
+    );
+    await evalIn(
+      pet,
+      "window.petdesk.act({type:'pref',key:'ledges',value:false})",
+    );
+    await until(
+      () => pet.getBounds().y + b.height === area.y + area.height,
+      'landing at desktop floor',
+    );
+    log(
+      'PASS: actual foreground window caught the falling pet, let it walk, carried it when moved and released it when closed',
+    );
+    const floor = pet.getBounds();
+    await evalIn(
+      pet,
+      "window.petdesk.act({type:'pref',key:'flight',value:true})",
+    );
+    await until(() => pet.getBounds().y < floor.y - 18, 'native takeoff');
+    await evalIn(
+      pet,
+      "window.petdesk.act({type:'pref',key:'roam',value:true})",
+    );
+    const air = pet.getBounds();
+    await until(
+      () =>
+        Math.abs(pet.getBounds().x - air.x) > 2 &&
+        Math.abs(pet.getBounds().y - air.y) > 2,
+      'two-axis native flight',
+    );
+    await evalIn(
+      pet,
+      "window.petdesk.act({type:'pref',key:'roam',value:false})",
+    );
+    await evalIn(
+      pet,
+      "window.petdesk.act({type:'animation',key:'fly',enabled:false})",
+    );
+    await until(
+      () => pet.getBounds().y === floor.y,
+      'revoking flight actually descends',
+    );
+    assert.equal(
+      await evalIn(
+        pet,
+        "window.petdesk.act({type:'pref',key:'flight',value:true}).then(r=>r.state.prefs.flight)",
+      ),
+      false,
+    );
+    log(
+      'PASS: two-dimensional flight, mandatory descent on disable, no flight through disabled permission',
     );
   }
   await evalIn(pet, 'window.petdesk.studio()');
@@ -276,7 +429,20 @@ async function run() {
   );
   await evalIn(
     studio,
-    `(async()=>{const blob=await(await fetch('./art/qwen.webp')).blob();const input=document.querySelector('.library input[type=file]'),dt=new DataTransfer();dt.items.add(new File([blob],'probe.webp',{type:'image/webp'}));input.files=dt.files;input.dispatchEvent(new Event('change',{bubbles:true}));})()`,
+    `Array.from(document.querySelectorAll('.model-card')).find(el=>el.textContent.includes('藤铃紫')).querySelector('button').click()`,
+  );
+  await until(
+    () =>
+      evalIn(
+        pet,
+        "!!document.querySelector('.native .qwen-actor[data-skin=qwen-lilac] svg')",
+      ),
+    'selected chibi skin on native pet',
+  );
+  log('PASS: matching selected chibi edition on native actor');
+  await evalIn(
+    studio,
+    `(async()=>{const blob=await(await fetch('./art/icon.png')).blob();const input=document.querySelector('.library input[type=file]'),dt=new DataTransfer();dt.items.add(new File([blob],'probe.png',{type:'image/png'}));input.files=dt.files;input.dispatchEvent(new Event('change',{bubbles:true}));})()`,
   );
   await until(
     () =>

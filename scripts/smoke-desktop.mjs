@@ -74,7 +74,7 @@ try {
     timeout = setTimeout(() => {
       child.kill();
       rej(Error('Desktop smoke timed out'));
-    }, 80000);
+    }, 120000);
   });
   const result = JSON.parse(await fs.readFile(resultFile, 'utf8'));
   if (!result.ok || code !== 0) throw Error(result.message || `Exit: ${code}`);

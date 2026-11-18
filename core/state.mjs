@@ -1,13 +1,15 @@
 import { MIN_SCALE, MAX_SCALE } from './motion.mjs';
-export const VERSION = '1.1.0';
-export const DEFAULT_MODEL = Object.freeze({
-  id: 'qwen',
-  name: 'Qwen 娘',
-  kind: 'illustration',
-});
+import { BUILTINS, builtin, clips, canFly, allowed } from './repertoire.mjs';
+import { say, dialogueKeys } from './dialogue.mjs';
+export const VERSION = '1.2.0';
+export const DEFAULT_MODEL = BUILTINS[0];
 export const DEFAULT_PREFS = Object.freeze({
   roam: true,
   edges: true,
+  flight: false,
+  ledges: true,
+  leisure: 'mix',
+  disabledClips: Object.freeze([]),
   sound: false,
   scale: 1,
   scene: 'meadow',
@@ -43,6 +45,7 @@ export function initialState(now = Date.now()) {
     prefs: { ...DEFAULT_PREFS },
     model: { ...DEFAULT_MODEL },
     serial: 1,
+    voices: {},
     born: now,
     log: [
       {
@@ -66,6 +69,21 @@ export function restoreState(input, now = Date.now()) {
     s.prefs.scale = clamp(input.prefs.scale, MIN_SCALE, MAX_SCALE);
   if (input.prefs?.scene === 'dusk') s.prefs.scene = 'dusk';
   if (validModel(input.model)) s.model = cleanModel(input.model);
+  if (typeof input.prefs?.ledges === 'boolean')
+    s.prefs.ledges = input.prefs.ledges;
+  s.prefs.disabledClips = Object.keys(clips).filter(
+    (k) =>
+      clips[k].optional &&
+      Array.isArray(input.prefs?.disabledClips) &&
+      input.prefs.disabledClips.includes(k),
+  );
+  s.prefs.flight =
+    input.prefs?.flight === true && allowed(s.prefs, 'fly') && canFly(s.model);
+  if (['mix', 'play', 'read', 'tea', 'quiet'].includes(input.prefs?.leisure))
+    s.prefs.leisure = input.prefs.leisure;
+  for (const k of dialogueKeys)
+    if (Number.isSafeInteger(input.voices?.[k]))
+      s.voices[k] = Math.max(0, input.voices[k]);
   s.sleeping = input.sleeping === true;
   s.meals = Math.max(0, whole(input.meals));
   s.serial = Math.max(1, whole(input.serial, 1));
@@ -91,13 +109,18 @@ export function restoreState(input, now = Date.now()) {
 export const validModel = (m) =>
   m &&
   typeof m.id === 'string' &&
-  (/^local-[a-zA-Z0-9-]{1,60}$/.test(m.id) || m.id === 'qwen') &&
+  (/^local-[a-zA-Z0-9-]{1,60}$/.test(m.id) || !!builtin(m.id)) &&
   ['illustration', 'image', 'glb'].includes(m.kind) &&
   !!label(m.name);
 const cleanModel = (m) =>
-  m.id === 'qwen'
-    ? { ...DEFAULT_MODEL }
-    : { id: m.id, name: label(m.name), kind: m.kind };
+  builtin(m.id)
+    ? { ...builtin(m.id) }
+    : {
+        id: m.id,
+        name: label(m.name),
+        kind: m.kind,
+        ...(m.kind === 'glb' ? { flyClip: m.flyClip === true } : {}),
+      };
 export function reduceState(state, a, now = Date.now()) {
   if (!a || typeof a.type !== 'string') return state;
   const s = { ...state, serial: state.serial + 1, stats: { ...state.stats } };
@@ -109,33 +132,45 @@ export function reduceState(state, a, now = Date.now()) {
     ));
   const react = (kind, text, ms = 4300) =>
     (s.reaction = { id: s.serial, kind, text, at: now, until: now + ms });
+  const line = (k) => {
+    const n = s.voices?.[k] || 0;
+    s.voices = { ...s.voices, [k]: (n + 1) % 100000 };
+    return say(k, n);
+  };
   switch (a.type) {
     case 'pat':
       s.sleeping = false;
       inc('mood', 3);
       inc('bond', 2);
-      react(
-        'pat',
-        ['嘿嘿，最喜欢你啦！', '再摸一下嘛～', '今天也一起加油呀！'][
-          s.serial % 3
-        ],
-      );
+      react('pat', line('pat'));
       log('interact', `轻轻摸了摸${s.model.name}的头。`);
       break;
+    case 'chat':
+      react('chat', line('chat'));
+      log('interact', '和伙伴聊了一句。');
+      break;
+    case 'read':
+    case 'tea':
+      if (!allowed(s.prefs, a.type)) return state;
+      s.sleeping = false;
+      react(a.type, line(a.type));
+      log(
+        'interact',
+        a.type === 'read' ? '一起翻开了绘本。' : '一起喝了一盏花茶。',
+      );
+      break;
     case 'play':
+      if (!allowed(s.prefs, 'play')) return state;
       s.sleeping = false;
       inc('mood', 6);
       inc('bond', 1);
       inc('fullness', -3);
-      react('play', '看好啦，这一式叫花间摇扇。');
+      react('play', line('play'));
       log('interact', `和${s.model.name}玩了一会儿。`);
       break;
     case 'nap':
       s.sleeping = !s.sleeping;
-      react(
-        s.sleeping ? 'sleep' : 'wake',
-        s.sleeping ? '午安，待会见… z Z' : '我醒啦！',
-      );
+      react(s.sleeping ? 'sleep' : 'wake', line(s.sleeping ? 'sleep' : 'wake'));
       log(
         'interact',
         s.sleeping ? '伙伴合眼垂首，小憩片刻。' : '伙伴睡醒了，伸了个懒腰。',
@@ -148,7 +183,7 @@ export function reduceState(state, a, now = Date.now()) {
       inc('fullness', 16);
       inc('mood', 4);
       inc('bond', 2);
-      react('eat', '啊呜，好吃！再来一口～');
+      react('eat', line('eat'));
       log(
         'feed',
         a.type === 'meal'
@@ -162,35 +197,79 @@ export function reduceState(state, a, now = Date.now()) {
         minute: '2-digit',
         hour12: false,
       });
-      react('time', `现在是 ${t} 哦！`);
+      react('time', line('time').replace('{t}', t));
       log('interact', '伙伴报出了本地时间。');
+      break;
+    }
+    case 'animation': {
+      const { key, enabled } = a;
+      if (
+        !Object.hasOwn(clips, key) ||
+        !clips[key].optional ||
+        typeof enabled !== 'boolean' ||
+        enabled === allowed(s.prefs, key)
+      )
+        return state;
+      s.prefs = {
+        ...s.prefs,
+        disabledClips: enabled
+          ? s.prefs.disabledClips.filter((k) => k !== key)
+          : [...s.prefs.disabledClips, key],
+      };
+      if (!enabled && key === 'fly') s.prefs.flight = false;
+      if (!enabled && s.prefs.leisure === key) s.prefs.leisure = 'mix';
+      if (!enabled && s.reaction?.kind === key) s.reaction = null;
       break;
     }
     case 'pref': {
       const { key, value } = a;
       if (
-        ['roam', 'edges', 'sound'].includes(key)
+        ['roam', 'edges', 'sound', 'ledges', 'flight'].includes(key)
           ? typeof value !== 'boolean'
-          : key === 'scale'
+          : key === 'leisure'
             ? !(
-                Number.isFinite(value) &&
-                value >= MIN_SCALE &&
-                value <= MAX_SCALE
+                ['mix', 'quiet', 'play', 'read', 'tea'].includes(value) &&
+                allowed(s.prefs, value)
               )
-            : key === 'scene'
-              ? !['meadow', 'dusk'].includes(value)
-              : true
+            : key === 'scale'
+              ? !(
+                  Number.isFinite(value) &&
+                  value >= MIN_SCALE &&
+                  value <= MAX_SCALE
+                )
+              : key === 'scene'
+                ? !['meadow', 'dusk'].includes(value)
+                : true
+      )
+        return state;
+      if (
+        key === 'flight' &&
+        value &&
+        (!canFly(s.model) || !allowed(s.prefs, 'fly'))
       )
         return state;
       if (s.prefs[key] === value) return state;
       s.prefs = { ...s.prefs, [key]: value };
       break;
     }
+    case 'model-caps':
+      if (
+        s.model.kind !== 'glb' ||
+        a.id !== s.model.id ||
+        typeof a.flyClip !== 'boolean' ||
+        s.model.flyClip === a.flyClip
+      )
+        return state;
+      s.model = { ...s.model, flyClip: a.flyClip };
+      if (!a.flyClip) s.prefs = { ...s.prefs, flight: false };
+      break;
     case 'select':
       if (!validModel(a.model)) return state;
       s.model = cleanModel(a.model);
       s.sleeping = false;
-      react('wake', '嗨，很高兴见到你！');
+      if (!canFly(s.model) && s.prefs.flight)
+        s.prefs = { ...s.prefs, flight: false };
+      react('wake', line('greet'));
       log('model', `换上了「${s.model.name}」模型。`);
       break;
     case 'removed':

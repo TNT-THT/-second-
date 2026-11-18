@@ -1,8 +1,11 @@
+import { BUILTINS, builtin, allowed } from '../core/repertoire.mjs';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import {
   ArrowUpRight,
   Clapperboard,
+  MessageCircle,
+  PanelsTopLeft,
   BookOpen,
   Box,
   Boxes,
@@ -61,7 +64,7 @@ import {
   setPet,
   useStudio,
 } from './store.js';
-import { MotionRoom } from './MotionRoom.jsx';
+import { MotionRoom, RoutePicker, LeisurePicker } from './MotionRoom.jsx';
 import { MIN_SCALE, MAX_SCALE } from '../core/motion.mjs';
 import { Companion, Avatar } from './Companion.jsx';
 import { importModel, listModels, removeModel } from './models.js';
@@ -70,6 +73,7 @@ import { Modal, IconButton, Toggle, SnackArt } from './ui.jsx';
 const pages = [
   ['desk', '工作台', LayoutDashboard],
   ['models', '模型库', Layers3],
+  ['motion', '动作手册', Clapperboard],
   ['history', '活动记录', History],
 ];
 const titles = {
@@ -79,6 +83,11 @@ const titles = {
     '在这里照顾伙伴，定制属于你的桌面陪伴。',
   ],
   models: ['MODEL LIBRARY', '模型库', '收藏喜欢的形象，随时为桌面换一位伙伴。'],
+  motion: [
+    'MOTION HANDBOOK',
+    '伙伴动作手册',
+    '试映当前形象，决定她在哪里散步、怎样度过闲暇。',
+  ],
   history: [
     'ACTIVITY JOURNAL',
     '活动记录',
@@ -169,6 +178,7 @@ function Stage({
   paused,
   onMotionRoom,
 }) {
+  const [practice, setPractice] = useState(false);
   const dusk = state.prefs.scene === 'dusk';
   return (
     <section className={'panel stage-panel ' + (expanded ? 'expanded' : '')}>
@@ -204,7 +214,12 @@ function Stage({
           <i /> LIVE
         </span>
         <span className="scene-no">SCENE &nbsp;{dusk ? '02' : '01'} / 02</span>
-        <Companion onFeed={feed} paused={paused} notify={notify} />
+        <Companion
+          practice={practice}
+          onFeed={feed}
+          paused={paused}
+          notify={notify}
+        />
         <div className="scene-location">
           <MapPin size={14} />
           {dusk ? '薄暮花庭' : '紫藤花庭'}
@@ -225,12 +240,22 @@ function Stage({
           <i />
           拖拽移动
         </span>
+        <button
+          className="shelf-btn"
+          aria-pressed={practice}
+          disabled={!state.prefs.ledges}
+          onClick={() => setPractice(!practice)}
+        >
+          <PanelsTopLeft size={13} /> 练习窗沿
+        </button>
         <span className="quiet-status">
           <b />
           {state.sleeping
             ? '正在小憩'
             : state.prefs.roam
-              ? '自由漫游已开启'
+              ? state.prefs.flight
+                ? '空中巡游'
+                : '步行巡游'
               : '已固定位置'}
         </span>
       </div>
@@ -241,6 +266,7 @@ function Profile({ state, toModels }) {
   const { model, stats, sleeping } = state;
   const actions = [
     ['pat', Heart, '摸摸头'],
+    ['chat', MessageCircle, '说说话'],
     ['play', Gamepad2, '玩一会'],
     ['nap', sleeping ? Sun : Moon, sleeping ? '唤醒她' : '小憩'],
   ];
@@ -254,16 +280,18 @@ function Profile({ state, toModels }) {
       <div className="profile-body">
         <div className="identity">
           <div className="face">
-            <Avatar model={model} flat />
+            <Avatar key={model.id} model={model} flat />
           </div>
           <div className="identity-text">
             <div className="serial">
-              {model.id === 'qwen' ? 'SERVICE QWEN' : 'CUSTOM COMPANION'}
+              {builtin(model.id)
+                ? 'POCKET QWEN / ' + builtin(model.id).code
+                : 'CUSTOM COMPANION'}
             </div>
             <h3>{model.name}</h3>
             <span className="label-lilac">
-              {model.id === 'qwen'
-                ? '默认伙伴'
+              {builtin(model.id)
+                ? 'Q版 · ' + builtin(model.id).edition
                 : model.kind === 'glb'
                   ? '3D 模型'
                   : '2D 模型'}
@@ -308,6 +336,7 @@ function Profile({ state, toModels }) {
           {actions.map(([k, I, t]) => (
             <button
               key={k}
+              disabled={k === 'play' && !allowed(state.prefs, 'play')}
               className={'interact ' + k}
               onClick={() => {
                 chirp(k);
@@ -368,6 +397,13 @@ function DropStation({ feed }) {
             e.target.value = '';
           }}
         />
+        <div className="snack-receipt">
+          <span>01 · 选择点心</span>
+          <i>›</i>
+          <span>02 · 核对文件</span>
+          <i>›</i>
+          <span>{api ? '03 · 确认回收' : '03 · 模拟进食'}</span>
+        </div>
         <div className="footnote">
           <Info size={13} />
           {api
@@ -416,7 +452,7 @@ function ScaleControl({ value }) {
     </label>
   );
 }
-function Behavior({ state, settings }) {
+function Behavior({ state, settings, handbook }) {
   return (
     <section className="panel behavior">
       <PanelTitle icon={SlidersHorizontal} title="行为设置">
@@ -432,7 +468,11 @@ function Behavior({ state, settings }) {
           value={state.prefs.roam}
           change={(v) => pref('roam', v)}
         />
+        <RoutePicker state={state} />
         <ScaleControl value={state.prefs.scale} />
+        <button className="handbook-link" onClick={handbook}>
+          <Clapperboard size={14} /> 管理动作与待机 <ChevronRight size={14} />
+        </button>
       </div>
     </section>
   );
@@ -440,7 +480,10 @@ function Behavior({ state, settings }) {
 function Library({ state, models, onImport, onRemove, loading, sample }) {
   const inp = useRef();
   const [over, hover] = useState(false);
-  const all = [{ ...DEFAULT_MODEL, ext: '内置立绘' }, ...models];
+  const all = [
+    ...BUILTINS.map((m) => ({ ...m, ext: 'Q版 · ' + m.edition })),
+    ...models,
+  ];
   return (
     <div className="library">
       <div className="section-label">
@@ -464,7 +507,11 @@ function Library({ state, models, onImport, onRemove, loading, sample }) {
             }
             key={m.id}
           >
-            <div className={'model-thumb ' + (m.id === 'qwen' ? 'garden' : '')}>
+            <div
+              className={
+                'model-thumb ' + (builtin(m.id) ? 'garden ' + m.id : '')
+              }
+            >
               <Avatar model={m} flat={m.kind === 'glb'} />
               <span className="model-type">{m.ext}</span>
               {m.id === state.model.id && (
@@ -476,9 +523,9 @@ function Library({ state, models, onImport, onRemove, loading, sample }) {
             <div className="model-info">
               <h3>{m.name}</h3>
               <p>
-                {m.id === 'qwen'
-                  ? '花庭侍者 · 2D 插画'
-                  : `${m.kind === 'glb' ? '3D 动画模型' : '2D 形象'} · ${formatBytes(m.size)}`}
+                {builtin(m.id)
+                  ? '掌心花庭 · ' + builtin(m.id).edition + ' / 分层 Q 版'
+                  : `${m.kind === 'glb' ? (m.flyClip ? '3D · 可飞行' : '3D · 地面') : '2D · 地面'} · ${formatBytes(m.size)}`}
               </p>
               <div>
                 <button
@@ -487,13 +534,18 @@ function Library({ state, models, onImport, onRemove, loading, sample }) {
                   onClick={() =>
                     act({
                       type: 'select',
-                      model: { id: m.id, name: m.name, kind: m.kind },
+                      model: {
+                        id: m.id,
+                        name: m.name,
+                        kind: m.kind,
+                        flyClip: m.flyClip,
+                      },
                     })
                   }
                 >
                   {m.id === state.model.id ? '当前伙伴' : '使用模型'}
                 </button>
-                {m.id !== 'qwen' && (
+                {!builtin(m.id) && (
                   <IconButton
                     label={'移除 ' + m.name}
                     onClick={() => onRemove(m)}
@@ -624,15 +676,15 @@ function Journal({ state, clear }) {
     </section>
   );
 }
-function Guide({ download = false }) {
+function Guide({ download = false, model }) {
   return (
     <>
       <div className="guide-hero">
         <div className="guide-avatar">
-          <img src="./art/qwen-face.webp" alt="" />
+          <Avatar model={model} key={model.id} flat />
         </div>
         <div>
-          <div className="eyebrow">SERVICE QWEN</div>
+          <div className="eyebrow">POCKET COMPANION</div>
           <strong>让她在桌面上陪你工作</strong>
           <p>无需一直打开工作台，也不需要登录。</p>
         </div>
@@ -702,6 +754,14 @@ function Settings({ state, utility }) {
           value={p.sound}
           change={(v) => pref('sound', v)}
         />
+        <SwitchRow
+          icon={PanelsTopLeft}
+          title="窗口落脚点"
+          desc="Windows：将当前普通窗口的上沿当作地面；不读取标题或画面。预览用练习窗沿。"
+          value={p.ledges}
+          change={(v) => pref('ledges', v)}
+        />
+        <LeisurePicker state={state} />
         <ScaleControl value={p.scale} />
       </div>
       <div className="tools-section">
@@ -748,6 +808,7 @@ function Studio() {
   );
   const go = (p) => {
     if (!pages.some(([id]) => id === p)) return;
+    notify('');
     setPage(p);
     setDialog(null);
     expand(false);
@@ -780,7 +841,7 @@ function Studio() {
       const m = await importModel(files[0]);
       await act({
         type: 'select',
-        model: { id: m.id, name: m.name, kind: m.kind },
+        model: { id: m.id, name: m.name, kind: m.kind, flyClip: m.flyClip },
       });
       await reload();
       notify(`已导入并换上「${m.name}」。`);
@@ -906,12 +967,17 @@ function Studio() {
             />
             <Profile state={state} toModels={() => go('models')} />
             <DropStation feed={feed} />
-            <Behavior state={state} settings={() => show('settings')} />
+            <Behavior
+              handbook={() => go('motion')}
+              state={state}
+              settings={() => show('settings')}
+            />
           </div>
         )}
         {expanded && (
           <div className="expand-shade" onClick={() => expand(false)} />
         )}
+        {page === 'motion' && <MotionRoom state={state} />}
         {page === 'models' && (
           <Library
             state={state}
@@ -964,9 +1030,9 @@ function Studio() {
           close={() => setDialog(null)}
         >
           {['guide', 'download'].includes(dialog.type) && (
-            <Guide download={dialog.type === 'download'} />
+            <Guide model={state.model} download={dialog.type === 'download'} />
           )}
-          {dialog.type === 'motion' && <MotionRoom />}
+          {dialog.type === 'motion' && <MotionRoom state={state} compact />}
           {dialog.type === 'settings' && (
             <Settings state={state} utility={utility} />
           )}

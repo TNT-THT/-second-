@@ -31,10 +31,14 @@ for variant in variants:
             "dist/models/Mint.glb",
         ]:
             assert app + "/" + rel in files, rel
-        keys = json.loads(z.read(files[app + "/core/qwen-atlas.json"]))
-        assert len(keys) == 11
-        for key in keys:
-            assert files[f"{app}/dist/art/motion/{key}.webp"].file_size > 1024
+        for edition in ["qwen", "qwen-lilac"]:
+            for part in ["", "-face"]:
+                assert b'data-j="body"' in z.read(
+                    files[f"{app}/dist/art/{edition}{part}.svg"]
+                )
+        if "--windows" in sys.argv:
+            assert z.read(files[app + "/dist/native/WindowLedge.exe"])[:2] == b"MZ"
+        assert not any("/art/motion/" in k for k in files)
         assert not any("native-probe" in k or "win-hit-probe" in k for k in files)
         assert root + "/使用说明.txt" in files
         for launcher in (

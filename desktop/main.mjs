@@ -1,3 +1,5 @@
+import { windowLedges } from './ledges.mjs';
+import { motionOptions, canFly, allowed } from '../core/repertoire.mjs';
 import {
   app,
   BrowserWindow,
@@ -35,7 +37,10 @@ import { feedOne, within } from './food.mjs';
 const BASE = fileURLToPath(new URL('../', import.meta.url)),
   DIST = path.join(BASE, 'dist');
 const HOME = 'petdesk://app/index.html',
-  REPO = 'https://github.com/TNT-THT/-second-/releases/tag/petdesk-v1.1.0';
+  REPO = 'https://github.com/TNT-THT/-second-/releases/tag/petdesk-v1.2.0';
+const ledges = windowLedges(path.join(DIST, 'native', 'WindowLedge.exe'), (p) =>
+  screen.screenToDipPoint(p),
+);
 const CSP =
   "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob: data:; media-src 'self' blob:; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'";
 const mime = {
@@ -188,6 +193,7 @@ function placeBack() {
   const pos = wander.place(wanted, area, size, {
     wait: 0.75,
     surface: wander.surface,
+    ledge: ledges.get(state.prefs.ledges),
   });
   pet.setBounds({ ...pos, ...size }, false);
   sendPose(wander.track());
@@ -249,6 +255,7 @@ function openPet() {
     hover = false;
     menuOpen = false;
     clearInterval(loop);
+    ledges.stop();
     wander = null;
     motion = { ...STILL };
     motionKey = '';
@@ -273,10 +280,17 @@ function settleDrag() {
   ).workArea;
   const size = actorSize(state.prefs.scale, a),
     target = moved ? { x: cursor.x - d.dx, y: cursor.y - d.dy } : b;
+  if (!moved && Date.now() - d.t < 180) {
+    sendPose(wander.track());
+    return;
+  }
+  const opts = motionOptions(state);
   const pos = wander.place(target, a, size, {
-    wait: 1.2,
-    snap: moved && state.prefs.edges,
-    surface: !state.prefs.edges ? 'floor' : undefined,
+    ...opts,
+    wait: 1.1,
+    snap: moved,
+    release: true,
+    ledge: ledges.get(state.prefs.ledges),
   });
   pet.setBounds({ ...pos, ...size }, false);
   sendPose(wander.track());
@@ -304,8 +318,8 @@ function tick() {
     return;
   }
   const pose = wander.step(dt, {
-    roam: state.prefs.roam,
-    edges: state.prefs.edges,
+    ...motionOptions(state, now),
+    ledge: ledges.get(state.prefs.ledges, now),
     blocked:
       hover ||
       feedBusy ||
@@ -424,7 +438,24 @@ function petMenu() {
     { label: `${state.model.name} · PetDesk`, enabled: false },
     { type: 'separator' },
     { label: '摸摸头', click: () => dispatch({ type: 'pat' }) },
-    { label: '一起玩耍', click: () => dispatch({ type: 'play' }) },
+    { label: '说说话', click: () => dispatch({ type: 'chat' }) },
+    ...[
+      ['play', '跳扇舞'],
+      ['read', '翻绘本'],
+      ['tea', '喝花茶'],
+    ].map(([type, label]) => ({
+      label,
+      enabled: allowed(state.prefs, type),
+      click: () => dispatch({ type }),
+    })),
+    {
+      label: '自由飞行',
+      type: 'checkbox',
+      checked: state.prefs.flight,
+      enabled: canFly(state.model) && allowed(state.prefs, 'fly'),
+      click: () =>
+        dispatch({ type: 'pref', key: 'flight', value: !state.prefs.flight }),
+    },
     {
       label: state.sleeping ? '叫醒伙伴' : '小憩一下',
       click: () => dispatch({ type: 'nap' }),
@@ -473,6 +504,11 @@ function wire() {
         'pat',
         'play',
         'nap',
+        'chat',
+        'tea',
+        'read',
+        'animation',
+        'model-caps',
         'time',
         'pref',
         'select',
@@ -646,6 +682,7 @@ if (!app.requestSingleInstanceLock()) {
   });
   app.on('before-quit', () => {
     clearInterval(loop);
+    ledges.stop();
     persist();
   });
 }

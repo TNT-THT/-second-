@@ -1,3 +1,5 @@
+import { builtin, motionOptions } from '../core/repertoire.mjs';
+import { say } from '../core/dialogue.mjs';
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Box, TriangleAlert, Heart } from 'lucide-react';
 import { getModel } from './models.js';
@@ -20,24 +22,28 @@ export function Avatar({
   face = 1,
   trackRef,
   token = 0,
+  demo = false,
+  disabled = [],
 }) {
   const actionRef = useRef({ kind, face });
-  actionRef.current = { kind, face };
+  actionRef.current = { kind, face, disabled };
   const [asset, setAsset] = useState(null),
     [error, setError] = useState('');
   const canvas = useRef(null);
   useEffect(() => {
     setAsset(null);
     setError('');
-    if (model.id === 'qwen' || (flat && model.kind === 'glb')) return;
+    if (builtin(model.id)) return;
     let live = true,
       url;
     getModel(model.id)
       .then((r) => {
         if (!live) return;
         if (!r) throw Error('模型副本缺失');
-        if (r.kind === 'image') {
-          url = URL.createObjectURL(r.blob);
+        if (r.kind === 'glb' && model.flyClip !== r.flyClip)
+          void act({ type: 'model-caps', id: r.id, flyClip: r.flyClip });
+        if (r.kind === 'image' || (flat && r.thumb)) {
+          url = URL.createObjectURL(flat && r.thumb ? r.thumb : r.blob);
           setAsset({ id: r.id, url });
         } else setAsset({ id: r.id, blob: r.blob });
       })
@@ -72,20 +78,27 @@ export function Avatar({
         <small>{error}</small>
       </span>
     );
-  if (model.id === 'qwen' && animated)
+  if (builtin(model.id) && animated)
     return (
-      <QwenActor kind={kind} face={face} trackRef={trackRef} token={token} />
+      <QwenActor
+        skin={model.id}
+        demo={demo}
+        kind={kind}
+        face={face}
+        trackRef={trackRef}
+        token={token}
+      />
     );
-  if (model.id === 'qwen')
+  if (builtin(model.id))
     return (
       <img
         draggable="false"
         className={'avatar ' + className}
-        src={flat ? './art/qwen-face.webp' : './art/qwen.webp'}
+        src={`./art/${model.id}${flat ? '-face' : ''}.svg`}
         alt="蓝发执扇的 Qwen 娘"
       />
     );
-  if (model.kind === 'glb')
+  if (model.kind === 'glb' && !(flat && asset?.url && asset.id === model.id))
     return flat ? (
       <Box className={'avatar box-avatar ' + className} />
     ) : (
@@ -106,7 +119,13 @@ export function Avatar({
     <span />
   );
 }
-export function Companion({ mode = 'stage', onFeed, notify, paused = false }) {
+export function Companion({
+  mode = 'stage',
+  onFeed,
+  notify,
+  paused = false,
+  practice = false,
+}) {
   const { state } = useStudio(),
     { prefs, reaction, sleeping, model } = state,
     native = mode === 'native';
@@ -123,11 +142,20 @@ export function Companion({ mode = 'stage', onFeed, notify, paused = false }) {
     dropRef = useRef(false);
   const [track, setTrack] = useState(STILL),
     [held, setHeld] = useState(false),
-    [landing, setLanding] = useState(false),
     [hover, setHover] = useState(false),
     [drop, setDrop] = useState(false),
     [, refresh] = useState(0);
-  config.current = { prefs, sleeping, reaction, paused };
+  config.current = { state, prefs, sleeping, reaction, paused, practice };
+  const bar = useRef(null);
+  function platform(a, size) {
+    if (!config.current.practice || !config.current.prefs.ledges) return null;
+    return {
+      id: 'practice',
+      x: a.width * 0.13,
+      width: a.width * 0.51,
+      y: Math.min(a.height - 5, Math.max(size.height + 3, a.height * 0.72)),
+    };
+  }
   function sync(t) {
     if (!t) return;
     const last = trackRef.current;
@@ -172,8 +200,8 @@ export function Companion({ mode = 'stage', onFeed, notify, paused = false }) {
     if (native) return;
     const el = node.current,
       p = plane.current;
-    let raf,
-      last = 0;
+    let timer,
+      last = performance.now();
     function fit() {
       if (!p.clientWidth || !p.clientHeight) return;
       const a = { x: 0, y: 0, width: p.clientWidth, height: p.clientHeight },
@@ -190,6 +218,14 @@ export function Companion({ mode = 'stage', onFeed, notify, paused = false }) {
       );
       el.style.height = size.height + 'px';
       el.style.width = size.width + 'px';
+      const shelf = platform(a, size);
+      if (bar.current && shelf) {
+        Object.assign(bar.current.style, {
+          left: shelf.x + 'px',
+          top: shelf.y + 'px',
+          width: shelf.width + 'px',
+        });
+      }
       const old = rig.current;
       if (
         old &&
@@ -202,7 +238,7 @@ export function Companion({ mode = 'stage', onFeed, notify, paused = false }) {
       if (!old) {
         const pos = {
           x: (a.width - size.width) * 0.495,
-          y: (a.height - size.height) * 0.84,
+          y: a.height - size.height,
         };
         rig.current = new Wander(pos, a, size, { surface: 'floor', wait: 6 });
       } else {
@@ -219,7 +255,7 @@ export function Companion({ mode = 'stage', onFeed, notify, paused = false }) {
             size.height,
           );
         }
-        old.place(n, a, size, { surface: old.surface, wait: 1 });
+        old.place(n, a, size, { surface: old.surface, wait: 1, ledge: shelf });
       }
       place(rig.current.pos);
       sync(rig.current.track());
@@ -228,17 +264,18 @@ export function Companion({ mode = 'stage', onFeed, notify, paused = false }) {
     measure.current = fit;
     const ro = new ResizeObserver(fit);
     ro.observe(p);
-    function run(t) {
-      raf = requestAnimationFrame(run);
-      if (t - last < 32) return;
+    function run() {
+      // Transparent/occluded compositors may withhold frame callbacks. Keep physics on
+      // a monotonic clock like the native main process; never catch up a hidden tab.
+      const t = performance.now();
       const dt = (t - last) / 1000;
       last = t;
       const r = rig.current,
         c = config.current;
       if (!r || document.hidden || drag.current) return;
       const pose = r.step(dt, {
-        roam: c.prefs.roam,
-        edges: c.prefs.edges,
+        ...motionOptions(c.state),
+        ledge: platform(r.area, r.size),
         blocked:
           c.sleeping ||
           hoverRef.current ||
@@ -249,16 +286,16 @@ export function Companion({ mode = 'stage', onFeed, notify, paused = false }) {
       if (r.pos.x !== pos.current.x || r.pos.y !== pos.current.y) place(r.pos);
       sync(pose);
     }
-    raf = requestAnimationFrame(run);
+    timer = setInterval(run, 33);
     return () => {
-      cancelAnimationFrame(raf);
+      clearInterval(timer);
       ro.disconnect();
       measure.current = null;
     };
   }, [native]);
   useLayoutEffect(() => {
     measure.current?.();
-  }, [prefs.scale]);
+  }, [prefs.scale, practice, prefs.ledges]);
   useEffect(() => {
     if (!native) return;
     let alive = true,
@@ -298,8 +335,7 @@ export function Companion({ mode = 'stage', onFeed, notify, paused = false }) {
       lastAt: performance.now(),
     };
     drag.current = d;
-    clearTimeout(timers.current.land);
-    setLanding(false);
+
     rig.current?.stop();
     timers.current.hold = setTimeout(() => {
       if (drag.current === d) {
@@ -348,18 +384,18 @@ export function Companion({ mode = 'stage', onFeed, notify, paused = false }) {
     if (e.currentTarget.hasPointerCapture(e.pointerId))
       e.currentTarget.releasePointerCapture(e.pointerId);
     const r = rig.current;
-    if (r) {
+    if (r && (d.moved || d.long)) {
       r.place(r.pos, r.area, r.size, {
-        wait: 1.3,
-        snap: d.moved && prefs.edges,
+        ...motionOptions(state),
+        wait: 1.1,
+        snap: d.moved,
+        release: true,
+        ledge: platform(r.area, r.size),
       });
       place(r.pos);
       sync(r.track());
     }
-    if (d.moved || d.long) {
-      setLanding(true);
-      timers.current.land = setTimeout(() => setLanding(false), 380);
-    } else if (!cancel) pat();
+    if (!d.moved && !d.long && !cancel) pat();
   }
   function overFiles(on) {
     dropRef.current = on;
@@ -369,28 +405,44 @@ export function Companion({ mode = 'stage', onFeed, notify, paused = false }) {
   const kind = performanceFor({
     track,
     held,
-    landing,
+    prefs,
     offer: drop,
     hover,
     sleeping,
     reaction: live,
   });
-  const face = ['walk', 'climb', 'glide'].includes(kind) ? track.face : 1;
-  const speech = drop
-    ? '先看看，是什么点心？'
+  const face = ['walk', 'climb', 'hang', 'fly'].includes(kind) ? track.face : 1;
+  const cue = drop
+    ? 'offer'
     : held
-      ? '慢一点，我扶好帽子啦！'
-      : live?.text ||
-        {
-          sleep: '呼… z Z',
-          play: '请看这一式花间扇。',
-          walk: '一起走走吧。',
-          climb: '我来攀这边。',
-          glide: '搭一程扇上的风。',
-          notice: '我在这里。',
-          land: '稳稳落地。',
-        }[kind] ||
-        '今天也请多多关照。';
+      ? 'held'
+      : track.surface === 'window' && kind === 'idle'
+        ? 'window'
+        : kind;
+  const counts = useRef({}),
+    [utter, setUtter] = useState({ text: say('idle'), brief: false });
+  useEffect(() => {
+    const n = counts.current[cue] || 0;
+    counts.current[cue] = n + 1;
+    const brief = [
+      'land',
+      'held',
+      'offer',
+      'notice',
+      'read',
+      'tea',
+      'play',
+      'window',
+      'fly',
+    ].includes(cue);
+    const text = say(cue, n);
+    setUtter({ text, brief });
+    if (brief) {
+      const timer = setTimeout(() => setUtter({ text, brief: false }), 2400);
+      return () => clearTimeout(timer);
+    }
+  }, [cue]);
+  const speech = (!drop && !held && live?.text) || utter.text;
   return (
     <div
       ref={plane}
@@ -417,6 +469,11 @@ export function Companion({ mode = 'stage', onFeed, notify, paused = false }) {
         else notify?.('预览中可以点按或拖动角色；桌面版右键可打开伙伴菜单。');
       }}
     >
+      {!native && practice && prefs.ledges && (
+        <div className="practice-ledge" ref={bar}>
+          <span>练习窗沿</span>
+        </div>
+      )}
       <div
         ref={node}
         role="button"
@@ -446,7 +503,7 @@ export function Companion({ mode = 'stage', onFeed, notify, paused = false }) {
           }
         }}
       >
-        {(!native || live || drop) && (
+        {(!native || live || drop || held || utter.brief) && (
           <div className="pet-speech">
             {speech}
             {!live && kind === 'idle' && (
@@ -454,14 +511,13 @@ export function Companion({ mode = 'stage', onFeed, notify, paused = false }) {
             )}
           </div>
         )}
-        {track.surface === 'floor' &&
-          !['held', 'glide', 'climb'].includes(kind) && (
-            <span className="pet-shadow" />
-          )}
+        {['floor', 'window'].includes(track.surface) && kind !== 'held' && (
+          <span className="pet-shadow" />
+        )}
         <div
           className={
             'pet-art ' +
-            (model.id === 'qwen'
+            (builtin(model.id)
               ? 'authored'
               : model.kind === 'image'
                 ? 'image-adapter'
@@ -471,6 +527,8 @@ export function Companion({ mode = 'stage', onFeed, notify, paused = false }) {
         >
           <Avatar
             model={model}
+            key={model.id}
+            disabled={prefs.disabledClips}
             animated
             kind={kind}
             face={face}

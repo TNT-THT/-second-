@@ -33,6 +33,38 @@ export async function checkRenderable(data) {
     const size = new T.Box3().setFromObject(g.scene).getSize(new T.Vector3());
     if (!Number.isFinite(size.length()) || !size.length())
       throw Error('模型中没有可显示的网格。');
+    // Render the imported model once for the card/profile, never screen contents.
+    let renderer;
+    try {
+      const canvas = document.createElement('canvas');
+      renderer = new T.WebGLRenderer({ canvas, alpha: true, antialias: true });
+      renderer.setSize(208, 208, false);
+      const scene = new T.Scene(),
+        box = new T.Box3().setFromObject(g.scene),
+        c = box.getCenter(new T.Vector3()),
+        d = Math.max(size.x, size.y) * 2.05 + size.z * 0.5;
+      const cam = new T.PerspectiveCamera(
+        32,
+        1,
+        Math.max(0.0001, d / 200),
+        d * 10,
+      );
+      cam.position.set(c.x, c.y, c.z + d);
+      cam.lookAt(c);
+      scene.add(g.scene, new T.HemisphereLight(0xfff7ff, 0xd2c8e3, 2.5));
+      const l = new T.DirectionalLight(0xfff5df, 2);
+      l.position.set(2, 4, 3);
+      scene.add(l);
+      renderer.render(scene, cam);
+      return await new Promise((resolve) =>
+        canvas.toBlob(resolve, 'image/webp', 0.9),
+      );
+    } catch {
+      return null;
+    } finally {
+      renderer?.dispose();
+      renderer?.forceContextLoss();
+    }
   } finally {
     dispose(g.scene);
   }
@@ -74,17 +106,23 @@ export async function mountModel(
   let prevPose = '',
     previousAction;
   function syncClip() {
-    const { kind, face } = getPose(),
-      key = `${kind}/${face}`;
+    const { kind, face, disabled = [] } = getPose(),
+      key = `${kind}/${face}/${disabled.join(',')}`;
     if (prevPose === key) return;
     prevPose = key;
-    const { index, directional } = matchAnimation(gltf.animations, kind, face);
-    canvas.style.transform =
-      !directional && ['walk', 'climb', 'glide'].includes(kind) && face < 0
-        ? 'scaleX(-1)'
-        : '';
+    const { index, mirror } = matchAnimation(
+      gltf.animations,
+      kind,
+      face,
+      disabled,
+    );
+    canvas.style.transform = mirror ? 'scaleX(-1)' : '';
     const clip = gltf.animations[index];
-    if (!clip) return;
+    if (!clip) {
+      previousAction?.stop();
+      previousAction = null;
+      return;
+    }
     const next = mixer.clipAction(clip);
     if (previousAction === next) return;
     next

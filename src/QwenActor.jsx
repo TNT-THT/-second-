@@ -1,137 +1,82 @@
-import React, { useEffect, useRef, useState } from 'react';
-import clips from '../core/qwen-atlas.json';
-// Only a handful of decoded textures, not one DOM image per frame. Share atlas loads in a window.
-const cache = new Map();
-function sheet(key) {
-  if (cache.has(key)) {
-    const p = cache.get(key);
-    cache.delete(key);
-    cache.set(key, p);
-    return p;
-  }
-  const im = new Image();
-  im.src = `./art/motion/${key}.webp`;
-  const p = im
-    .decode()
-    .then(() => im)
-    .catch((e) => {
-      cache.delete(key);
-      throw e;
-    });
-  cache.set(key, p);
-  if (cache.size > 3) cache.delete(cache.keys().next().value);
-  return p;
-}
+import React, { useId, useMemo, useRef, useLayoutEffect } from 'react';
+import { drawChibi, poseAt } from '../art-src/chibi/puppet.mjs';
+import { clips } from '../core/repertoire.mjs';
+// Install trusted, authored paths once per costume, then update only joint attributes. No
+// remote references, atlas gutters, image decodes or asynchronous costume races.
 export function QwenActor({
+  skin = 'qwen',
   kind = 'idle',
   face = 1,
   trackRef,
   demo = false,
   token = 0,
 }) {
-  const el = useRef(null),
-    paint = useRef(null),
-    control = useRef(null);
-  const [failed, setFailed] = useState(false);
-  control.current = { face, trackRef, demo };
-  useEffect(() => {
-    let valid = true;
-    const key = Object.hasOwn(clips, kind) ? kind : 'idle';
-    sheet(key)
-      .then((im) => {
-        if (valid) {
-          paint.current = {
-            key,
-            im,
-            clip: clips[key],
-            start: performance.now(),
-            last: -1,
-          };
-          setFailed(false);
-          // Warm the likely next sheet while this pose is already on screen, especially
-          // the short landing beat which should not be eaten up by a first-time decode.
-          const next = {
-            idle: 'walk',
-            walk: 'climb',
-            climb: 'glide',
-            held: 'land',
-          }[key];
-          if (!control.current.demo && next) void sheet(next).catch(() => {});
-        }
-      })
-      .catch(() => {
-        if (valid) setFailed(true);
-      });
-    return () => {
-      valid = false;
-    };
-  }, [kind, token]);
-  useEffect(() => {
-    let raf,
-      prev = -1000;
-    const mq = matchMedia('(prefers-reduced-motion: reduce)');
+  const id = useId(),
+    host = useRef(null),
+    ctl = useRef(null);
+  ctl.current = { kind, face, trackRef, demo, token };
+  const markup = useMemo(
+    () => ({ __html: drawChibi({ skin, uid: id }) }),
+    [skin, id],
+  );
+  useLayoutEffect(() => {
+    const el = host.current,
+      parts = Array.from(el.querySelectorAll('[data-j]')).map((n) => [
+        n.dataset.j,
+        n,
+      ]),
+      cache = {},
+      mq = matchMedia('(prefers-reduced-motion: reduce)');
+    let start = 0,
+      lastKey = '';
     function draw(t) {
-      raf = requestAnimationFrame(draw);
-      const a = paint.current,
-        canvas = el.current;
-      if (!canvas || !a || document.hidden || t - prev < 1000 / 30) return;
-      prev = t;
-      const { clip, im, key } = a,
-        { trackRef, face, demo } = control.current;
-      let phase = (t - a.start) / 1000 / clip.seconds;
-      const motion = trackRef?.current;
+      if (document.hidden) return;
+      const cfg = ctl.current,
+        k = Object.hasOwn(clips, cfg.kind) ? cfg.kind : 'idle',
+        key = k + '/' + cfg.token;
+      if (key !== lastKey) {
+        lastKey = key;
+        start = t;
+      }
+      let p = ((t - start) / 1000 / clips[k].seconds) % 1;
+      const m = cfg.trackRef?.current;
       if (
-        !demo &&
-        motion?.kind === key &&
-        ['walk', 'climb', 'glide'].includes(key)
+        !cfg.demo &&
+        m?.kind === k &&
+        ['walk', 'climb', 'hang', 'land'].includes(k)
       )
-        phase = motion.phase;
-      if (key === 'land' && !demo) phase = Math.min(0.999, Math.max(0, phase));
-      const n =
-          mq.matches && !demo && ['idle', 'sleep', 'notice'].includes(key)
-            ? 0
-            : Math.floor((((phase % 1) + 1) % 1) * clip.frames),
-        flip = face < 0;
-      if (a.last === n && a.flip === flip) return;
-      const ctx = canvas.getContext('2d');
-      if (!ctx) return;
-      ctx.setTransform(1, 0, 0, 1, 0, 0);
-      ctx.clearRect(0, 0, clip.width, clip.height);
-      if (flip) ctx.setTransform(-1, 0, 0, 1, clip.width, 0);
-      ctx.drawImage(
-        im,
-        (n % clip.cols) * clip.width,
-        Math.floor(n / clip.cols) * clip.height,
-        clip.width,
-        clip.height,
-        0,
-        0,
-        clip.width,
-        clip.height,
-      );
-      canvas.dataset.clip = key;
-      canvas.dataset.frame = String(n);
-      canvas.dataset.face = flip ? 'left' : 'right';
-      a.last = n;
-      a.flip = flip;
+        p = m.phase;
+      if (!cfg.demo && mq.matches && ['idle', 'notice', 'sleep'].includes(k))
+        p = 0.18;
+      const state = poseAt(k, p, cfg.face);
+      for (const [name, node] of parts) {
+        const value = state[name];
+        if (cache[name] === value) continue;
+        if (value === '!') node.setAttribute('display', 'none');
+        else {
+          if (cache[name] == null || cache[name] === '!')
+            node.removeAttribute('display');
+          if (value) node.setAttribute('transform', value);
+          else node.removeAttribute('transform');
+        }
+        cache[name] = value;
+      }
+      el.dataset.clip = k;
+      el.dataset.face = cfg.face < 0 ? 'left' : 'right';
+      el.dataset.frame = String(Math.floor(p * 48));
     }
-    raf = requestAnimationFrame(draw);
-    return () => cancelAnimationFrame(raf);
-  }, []);
-  return failed ? (
-    <img
-      className="avatar"
-      src="./art/qwen.webp"
-      alt="Qwen 娘，动作资源未能载入"
-    />
-  ) : (
-    <canvas
-      ref={el}
-      width="352"
-      height="480"
+    draw(performance.now());
+    const timer = setInterval(() => draw(performance.now()), 34);
+    return () => clearInterval(timer);
+  }, [markup]);
+  return (
+    <span
+      ref={host}
       className="avatar qwen-actor"
       role="img"
-      aria-label="Qwen 娘动作立绘"
+      aria-label="Q版 Qwen 娘动作立绘"
+      data-skin={skin}
+      dangerouslySetInnerHTML={markup}
     />
   );
 }
