@@ -56,12 +56,14 @@ jobs:
         with:
           name: Haru-tested-Windows
           path: portable
-      - name: Attach only to an existing draft for this exact tested revision
+      - name: Attach to the existing draft and repoint it at this tested revision
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: petdesk-v2.0.0-haru-preview.1
         run: |
           set -eu
-          target=$(gh api "repos/$GITHUB_REPOSITORY/releases" --jq '.[] | select(.tag_name=="petdesk-v2.0.0-haru-preview.1" and .draft==true) | .target_commitish')
-          if [ "$target" != "$GITHUB_SHA" ]; then echo 'No matching exact-SHA draft; leaving workflow artifacts.'; exit 0; fi
+          id=$(gh api "repos/$GITHUB_REPOSITORY/releases" --jq '.[] | select(.tag_name=="petdesk-v2.0.0-haru-preview.1" and .draft==true) | .id')
+          if [ -z "$id" ]; then echo 'No matching draft; leaving workflow artifacts.'; exit 0; fi
+          # The assets below were produced from $GITHUB_SHA, so the draft must describe that revision.
+          gh api -X PATCH "repos/$GITHUB_REPOSITORY/releases/$id" -f target_commitish="$GITHUB_SHA" --jq '.target_commitish'
           gh release upload "$TAG" portable/*.zip portable/*.sha256 portable/Haru-workbench.png --repo "$GITHUB_REPOSITORY"
