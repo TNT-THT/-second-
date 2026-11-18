@@ -1,12 +1,7 @@
 #include "view.hpp"
 #include <objidl.h>
 #include <gdiplus.h>
-#if defined(_MSC_VER) && __has_include(<windows.ui.viewmanagement.h>)
-#include <windows.ui.viewmanagement.h>
-#include <roapi.h>
-#include <wrl.h>
-#include <wrl/wrappers/corewrappers.h>
-#endif
+#include <winreg.h>
 using namespace Gdiplus;
 namespace pet {
 View::View(HWND win, Vault &v) : hwnd(win), fx(v), files(v) {
@@ -45,16 +40,13 @@ void View::metrics() {
   UINT dpi = GetDpiForWindow(hwnd);
   if (!dpi)
     dpi = 96;
+  // Accessibility text scale is a documented read-only preference; no WinRT activation is needed.
   double textScale = 1;
-#if defined(_MSC_VER) && __has_include(<windows.ui.viewmanagement.h>)
-  using namespace Microsoft::WRL;
-  using namespace Microsoft::WRL::Wrappers;
-  ComPtr<IInspectable> obj;
-  ComPtr<ABI::Windows::UI::ViewManagement::IUISettings2> settings;
-  if (SUCCEEDED(RoActivateInstance(HStringReference(L"Windows.UI.ViewManagement.UISettings").Get(), &obj)) &&
-      SUCCEEDED(obj.As(&settings)))
-    settings->get_TextScaleFactor(&textScale);
-#endif
+  DWORD scale = 100, cb = sizeof scale;
+  if (RegGetValueW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Accessibility", L"TextScaleFactor",
+                   RRF_RT_REG_DWORD, nullptr, &scale, &cb) == ERROR_SUCCESS &&
+      scale >= 100 && scale <= 225)
+    textScale = scale / 100.;
   NONCLIENTMETRICSW n{sizeof(n)};
   SystemParametersInfoW(SPI_GETNONCLIENTMETRICS, sizeof n, &n, 0);
   font = std::max(16. * dpi / 96 * textScale, double(std::abs(n.lfMessageFont.lfHeight)));
