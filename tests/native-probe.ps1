@@ -42,9 +42,8 @@ public static class DeskProbe {
  static int rows(string p){using(var f=new FileStream(p,FileMode.Open,FileAccess.Read,FileShare.ReadWrite))using(var r=new StreamReader(f)) {int n=0;while(r.ReadLine()!=null)n++;return n;}}
  static void picker(IntPtr w,string file){
   for(int attempt=0;attempt<3;attempt++){
-   P p=waist(w);SetCursorPos(p.x,p.y);wait(120);click(8);wait(150);click(16);
-   if(!until(()=>FindWindow("#32768",null)!=IntPtr.Zero,2500)){SendKeys.SendWait("{ESC}");wait(300);continue;}
-   SendKeys.SendWait("{HOME}{ENTER}");IntPtr dialog=IntPtr.Zero;
+   P p=waist(w);SetCursorPos(p.x,p.y);wait(120);click(8);wait(150);click(16);wait(450);SendKeys.SendWait("{HOME}{ENTER}");
+   IntPtr dialog=IntPtr.Zero;
    if(!until(()=>(dialog=FindWindow("#32770",null))!=IntPtr.Zero,8000)){SendKeys.SendWait("{ESC}");wait(300);continue;}
    SetForegroundWindow(dialog);wait(300);IntPtr field=IntPtr.Zero;
    if(!until(()=>(field=edit(dialog))!=IntPtr.Zero,2500)){PostMessage(dialog,0x10,IntPtr.Zero,IntPtr.Zero);wait(300);continue;}
