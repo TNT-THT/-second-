@@ -44,7 +44,7 @@ struct Workbench::Impl {
   std::function<std::wstring()> env;
   std::function<bool()> voiceReady;
   HWND win = nullptr;
-  HFONT font = nullptr, heading = nullptr, small = nullptr;
+  HFONT font = nullptr, heading = nullptr, fine = nullptr;
   int dpi = 96;
   Page page = Page::home;
   std::vector<HWND> children;
@@ -72,7 +72,7 @@ struct Workbench::Impl {
   ~Impl() {
     if (win)
       DestroyWindow(win);
-    for (auto f : {font, heading, small})
+    for (auto f : {font, heading, fine})
       if (f)
         DeleteObject(f);
   }
@@ -204,7 +204,7 @@ struct Workbench::Impl {
       if (!win)
         return;
       font = makeFont(16, FW_NORMAL);
-      small = makeFont(14, FW_NORMAL);
+      fine = makeFont(14, FW_NORMAL);
       heading = makeFont(27, FW_SEMIBOLD);
     }
     rebuild();
@@ -226,9 +226,9 @@ struct Workbench::Impl {
   void paint(HDC dc) {
     card(dc, 0, 0, 770, 514, bg);
     card(dc, 0, 0, 770, 3, plum);
-    text(dc, L"D E S K S I D E     /     C O M P A N I O N     L A B", 26, 11, 520, 19, small, plum);
+    text(dc, L"D E S K S I D E     /     C O M P A N I O N     L A B", 26, 11, 520, 19, fine, plum);
     text(dc, L"Haru 的陪伴工作台", 26, 33, 570, 44, heading);
-    text(dc, s.trusted ? L"●　模型已校验" : L"○　纯规则保护", 580, 40, 160, 32, small, plum);
+    text(dc, s.trusted ? L"●　模型已校验" : L"○　纯规则保护", 580, 40, 160, 32, fine, plum);
     card(dc, 25, 145, 720, 314, panel);
     if (page == Page::home) {
       int W = 174, H = 230;
@@ -249,7 +249,7 @@ struct Workbench::Impl {
       bi.bmiHeader.biBitCount = 32;
       StretchDIBits(dc, px(46), px(166), px(W), px(H), 0, 0, W, H, portrait.data(), &bi, DIB_RGB_COLORS,
                     SRCCOPY);
-      text(dc, L"HARU   /   官方样例  4-r.7", 46, 399, 215, 25, small, plum);
+      text(dc, L"HARU   /   官方样例  4-r.7", 46, 399, 215, 25, fine, plum);
       text(dc, L"今天，一起做点什么？", 247, 169, 470, 43, heading);
       text(dc,
            L"饱食度  " + std::to_wstring(s.life.s.satiety) + L" / 100      今日投喂  " +
@@ -259,9 +259,9 @@ struct Workbench::Impl {
            s.mode == Mode::work   ? L"正在陪你工作"
            : s.mode == Mode::chat ? L"正在聊天"
                                   : L"自由活动中",
-           248, 259, 440, 25, small, muted);
+           248, 259, 440, 25, fine, muted);
     } else if (page == Page::intents) {
-      text(dc, L"安全表达范围　/　越界会回弹，所有参数仍受模型 Min / Max 限制", 32, 206, 700, 26, small,
+      text(dc, L"安全表达范围　/　越界会回弹，所有参数仍受模型 Min / Max 限制", 32, 206, 700, 26, fine,
            muted);
       for (int i = 0; i < 3; i++) {
         bool red = warning == i && GetTickCount64() < ULONGLONG(redUntil);
@@ -273,16 +273,16 @@ struct Workbench::Impl {
              L"%";
         text(dc, v, 34 + i * 237, 229, 216, 27, font, red ? RGB(185, 53, 56) : ink);
       }
-      text(dc, L"试演意图　/　相同标签冷却，不能打断的动作会先完成", 32, 307, 710, 30, small, muted);
+      text(dc, L"试演意图　/　相同标签冷却，不能打断的动作会先完成", 32, 307, 710, 30, fine, muted);
       text(dc,
            L"当前：" + wide(label(s.intents.tag).name) + L"   ·   可用语义 " + std::to_wstring(s.capability),
-           310, 412, 428, 36, small, plum);
+           310, 412, 428, 36, fine, plum);
     } else if (page == Page::senses) {
-      text(dc, L"默认关闭。点选后会先说明调用的 Windows 函数；各项可单独撤回。", 30, 149, 710, 30, small,
+      text(dc, L"默认关闭。点选后会先说明调用的 Windows 函数；各项可单独撤回。", 30, 149, 710, 30, fine,
            muted);
-      text(dc, env(), 32, 403, 693, 36, small, plum);
+      text(dc, env(), 32, 403, 693, 36, fine, plum);
     } else if (page == Page::doodle) {
-      text(dc, L"64 × 64　/　黑与白", 48, 153, 220, 34, small, plum);
+      text(dc, L"64 × 64　/　黑与白", 48, 153, 220, 34, fine, plum);
       std::array<uint32_t, 4096> bits{};
       for (int y = 0; y < 64; y++)
         for (int x = 0; x < 64; x++)
@@ -299,7 +299,7 @@ struct Workbench::Impl {
       Brush b(edge);
       FrameRect(dc, &rc, b.v);
       text(dc, L"画册　" + std::to_wstring(gallery.size()) + L" / 20", 286, 161, 385, 38, heading);
-      text(dc, L"只收进本地画册，不生成图片文件。满 20 张后仍可以画给她看。", 286, 381, 400, 67, small, muted,
+      text(dc, L"只收进本地画册，不生成图片文件。满 20 张后仍可以画给她看。", 286, 381, 400, 67, fine, muted,
            DT_LEFT | DT_WORDBREAK);
     } else {
       for (int i = 0; i < 3; i++) {
@@ -310,7 +310,7 @@ struct Workbench::Impl {
         Polygon(dc, pts.data(), int(pts.size()));
         SelectObject(dc, penOld);
         SelectObject(dc, old);
-        text(dc, achievement(i) ? L"已点亮" : L"未点亮", 113 + i * 238, 261, 115, 24, small, muted);
+        text(dc, achievement(i) ? L"已点亮" : L"未点亮", 113 + i * 238, 261, 115, 24, fine, muted);
       }
       const wchar_t *details[] = {L"七个连续的本地日期都有一次真实投喂。虚拟食物不计数。",
                                   L"23:00–06:00 在编辑器或已配对的洛谷前台，陪伴过一次。",
@@ -320,7 +320,7 @@ struct Workbench::Impl {
            49, 365, 670, 57, font, ink, DT_LEFT | DT_WORDBREAK);
     }
     text(dc, notice.empty() ? L"LOCAL ONLY    ·    你的文件不是食物本身，只是一次邀请。" : notice, 28, 467,
-         718, 39, small, notice.empty() ? muted : plum);
+         718, 39, fine, notice.empty() ? muted : plum);
   }
   void alter(int i) {
     auto o = s.opt;
