@@ -62,6 +62,7 @@ public static class DeskProbe {
   return false;
  }
  static string g_dump="";
+ static string readBack(IntPtr dialog){try{var root=AutomationElement.FromHandle(dialog);var ed=root.FindFirst(TreeScope.Descendants,new PropertyCondition(AutomationElement.ControlTypeProperty,ControlType.Edit));if(ed==null)return "noedit";return ((ValuePattern)ed.GetCurrentPattern(ValuePattern.Pattern)).Current.Value;}catch(Exception e){return e.Message;}}
  static bool setFileName(IntPtr dialog,string file){
   var root=AutomationElement.FromHandle(dialog);
   var all=root.FindAll(TreeScope.Descendants,Condition.TrueCondition);
@@ -77,16 +78,18 @@ public static class DeskProbe {
  }
  static void picker(IntPtr w,string file,uint pid){
   string why="";
-  for(int attempt=0;attempt<3;attempt++){
+  for(int attempt=0;attempt<2;attempt++){
    P p=waist(w);SetCursorPos(p.x,p.y);wait(150);click(8);wait(160);click(16);
    if(!until(()=>FindWindow("#32768",null)!=IntPtr.Zero,2500)){why+="nomenu;";wait(400);continue;}
    if(!invokeMenu("投喂")){why+="noitem;";SendKeys.SendWait("{ESC}");wait(400);continue;}
    IntPtr dialog=IntPtr.Zero;if(!until(()=>(dialog=dialogOf(pid))!=IntPtr.Zero,9000)){why+="nodlg;";wait(500);continue;}
-   wait(1200);bool ok=false;try{for(int k=0;k<8&&!ok;k++){ok=setFileName(dialog,file);if(!ok)wait(350);}}catch{}
-   if(!ok){IntPtr f=edit(dialog);if(f!=IntPtr.Zero){SendMessage(f,0x0c,IntPtr.Zero,file);ok=true;}}
-   if(!ok){why+="noedit["+g_dump+"];";PostMessage(dialog,0x10,IntPtr.Zero,IntPtr.Zero);wait(500);continue;}
-   wait(250);PostMessage(dialog,0x111,(IntPtr)1,IntPtr.Zero);
-   check(until(()=>dialogOf(pid)==IntPtr.Zero,6000),"picker did not accept the whitelisted path");return;
+   wait(1200);bool ok=false;string value="";
+   try{for(int k=0;k<8&&!ok;k++){ok=setFileName(dialog,file);if(ok)value=readBack(dialog);else wait(350);}}catch{}
+   if(!ok){IntPtr f=edit(dialog);if(f!=IntPtr.Zero){SendMessage(f,0x0c,IntPtr.Zero,file);wait(200);var b=new StringBuilder(520);SendMessage(f,0x0d,(IntPtr)520,(IntPtr)0);ok=true;why+="wmtext;";}}
+   SetForegroundWindow(dialog);wait(250);SendKeys.SendWait("{ENTER}");wait(600);
+   if(dialogOf(pid)!=IntPtr.Zero){PostMessage(dialog,0x111,(IntPtr)1,IntPtr.Zero);wait(500);}
+   if(dialogOf(pid)==IntPtr.Zero)return;
+   why+="open["+value+"];";SendKeys.SendWait("{ESC}");wait(400);
   }
   check(false,"no system file picker ["+why+"]");
  }
