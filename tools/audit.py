@@ -5,6 +5,7 @@ from pathlib import Path
 import argparse,base64,hashlib,json,re,struct
 root=Path(__file__).resolve().parents[1]
 DENY=re.compile(r'^(?:DeleteFile|RemoveDirectory|MoveFile(?:Ex|WithProgress|Transacted)?|ReplaceFile|CopyFile(?:Ex|2|Transacted)?|SetFileInformationByHandle|SetEndOfFile|SetFileValidData|SHFileOperation|FindFirstFile(?:Ex|Transacted)?|FindNextFile|EnumProcesses|K32EnumProcesses|CreateToolhelp32Snapshot|Process32(?:First|Next)|CreateRemoteThread(?:Ex)?|WriteProcessMemory|VirtualAllocEx|AdjustTokenPrivileges|RegSetValue(?:Ex)?|RegCreateKey(?:Ex)?|RegDelete(?:Key|Value|Tree)(?:Ex)?|SetWindowsHookEx|OpenClipboard|GetClipboardData|AddClipboardFormatListener|SetClipboardViewer|ShellExecute(?:Ex)?|CreateProcess|EncryptFile|DecryptFile|SetFileAttributes|SetSecurityInfo|NtSetInformationFile|(?:_w?|_)?(?:unlink|rmdir|remove|rename))(?:(?:A|W))?$',re.I)
+WINSOCK_ORDINALS={1:'accept',2:'bind',3:'closesocket',4:'connect',5:'getpeername',6:'getsockname',7:'getsockopt',8:'htonl',9:'htons',10:'ioctlsocket',11:'inet_addr',12:'inet_ntoa',13:'listen',14:'ntohl',15:'ntohs',16:'recv',17:'recvfrom',18:'select',19:'send',20:'sendto',21:'setsockopt',22:'shutdown',23:'socket',151:'__WSAFDIsSet'}
 PRIV=('SeDebugPrivilege','SeBackupPrivilege','SE_DEBUG_PRIVILEGE','SE_BACKUP_PRIVILEGE')
 def require(v,msg):
     if not v:raise SystemExit('AUDIT FAILED: '+msg)
@@ -43,9 +44,13 @@ def binary(path):
     while any(data[at:at+20]):
         orig,_,_,name,iat=struct.unpack_from('<5I',data,at);dll=string(name).lower();libs.append(dll);a=offset(orig or iat)
         while (entry:=u64(a)):
-            # ws2_32 exports __WSAFDIsSet (used by FD_ISSET in our loopback listener) by ordinal 151 only.
-            require(not(entry>>63) or (dll=='ws2_32.dll' and (entry&0xffff)==151),f'unresolved ordinal import from {dll}: entry={entry:#018x} rva={orig:#x} dlls={libs}')
-            imports.append('<__WSAFDIsSet>' if entry>>63 else string(entry+2));a+=8
+            # Winsock's legacy import library binds socket calls (accept..inet_addr) and the ordinal-only
+            # __WSAFDIsSet (used by FD_ISSET in our loopback listener) by ordinal. Nothing else may be.
+            if entry>>63:
+                require(dll=='ws2_32.dll' and (entry&0xffff) in WINSOCK_ORDINALS,f'unresolved ordinal import from {dll}: entry={entry:#018x}')
+                imports.append('<ws2_32 #%d %s>'%(entry&0xffff,WINSOCK_ORDINALS[entry&0xffff]))
+            else:imports.append(string(entry+2));a+=8;continue
+            a+=8
         at+=20
     require(u32(rvas+13*8)==0,'unexpected delay imports');require(not any(DENY.fullmatch(x) for x in imports),'denied import: '+', '.join(x for x in imports if DENY.fullmatch(x)))
     require(not any(x.startswith(('vcruntime','msvcp','libstdc++')) for x in libs),'unexpected runtime dependency');require(b'level="asInvoker"' in data or b"level='asInvoker'" in data,'no embedded asInvoker manifest');require(b'requireAdministrator' not in data,'elevated manifest');
