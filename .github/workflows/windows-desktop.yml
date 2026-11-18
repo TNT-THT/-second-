@@ -25,6 +25,16 @@ jobs:
         shell: powershell
         run: |
           try { & ./tests/native-probe.ps1 } catch { $msg=("$_ " + $_.ScriptStackTrace).Replace("`r",' ').Replace("`n",' '); Write-Host "::error title=Native probe::$msg"; throw }
+      - name: Keep a desktop screenshot if the probe failed
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: probe-desktop
+          path: |
+            ${{ runner.temp }}/**/fail.png
+            ${{ runner.temp }}/**/workbench.png
+          if-no-files-found: ignore
+          retention-days: 5
       - uses: actions/upload-artifact@v4
         with:
           name: Haru-tested-Windows

@@ -40,6 +40,7 @@ public static class DeskProbe {
  static void wait(int ms){var t=Stopwatch.StartNew();while(t.ElapsedMilliseconds<ms){Application.DoEvents();Thread.Sleep(12);}}
  static bool until(Func<bool> f,int ms){var t=Stopwatch.StartNew();while(!f()&&t.ElapsedMilliseconds<ms)wait(40);return f();}
  static void check(bool x,string why){if(!x)throw new Exception(why);}
+ static string cls(IntPtr w){var b=new StringBuilder(128);GetClassName(w,b,128);return b.ToString();}
  static P waist(IntPtr w){R r;GetWindowRect(w,out r);return new P((r.l+r.r)/2,r.b-138);}
  static int ht(IntPtr w,P p){return (int)SendMessage(w,0x84,IntPtr.Zero,(IntPtr)((p.x&65535)|(p.y<<16)));}
  static void click(int flag){mouse_event((uint)flag,0,0,0,UIntPtr.Zero);}
@@ -54,16 +55,18 @@ public static class DeskProbe {
   SendKeys.SendWait("{ESC}");return false;
  }
  static void picker(IntPtr w,string file){
+  string why="";
   for(int attempt=0;attempt<3;attempt++){
    P p=waist(w);SetCursorPos(p.x,p.y);wait(140);click(8);wait(160);click(16);
-   if(!menuClick(w,"投喂")){wait(500);continue;}
-   IntPtr dialog=IntPtr.Zero;if(!until(()=>(dialog=FindWindow("#32770",null))!=IntPtr.Zero,7000)){wait(600);continue;}
+   bool clicked=menuClick(w,"投喂");why+="try"+attempt+":menu="+(FindWindow("#32768",null)!=IntPtr.Zero)+",clicked="+clicked+",fg="+cls(GetForegroundWindow())+";";
+   if(!clicked){wait(500);continue;}
+   IntPtr dialog=IntPtr.Zero;if(!until(()=>(dialog=FindWindow("#32770",null))!=IntPtr.Zero,7000)){why+="nodlg,fg="+cls(GetForegroundWindow())+";";wait(600);continue;}
    SetForegroundWindow(dialog);wait(400);IntPtr field=IntPtr.Zero;
    if(!until(()=>(field=edit(dialog))!=IntPtr.Zero,3000)){SendKeys.SendWait("{ESC}");wait(400);continue;}
    SendMessage(field,0x0c,IntPtr.Zero,file);wait(180);PostMessage(dialog,0x111,(IntPtr)1,IntPtr.Zero);
    check(until(()=>FindWindow("#32770",null)==IntPtr.Zero,5000),"picker did not accept the whitelisted path");return;
   }
-  check(false,"no system file picker");
+  check(false,"no system file picker ["+why+"]");
  }
  static double sample(Process p,int ms,Action<float> drive){p.Refresh();TimeSpan old=p.TotalProcessorTime;var t=Stopwatch.StartNew();while(t.ElapsedMilliseconds<ms){if(drive!=null)drive(t.ElapsedMilliseconds/(float)ms);wait(40);}p.Refresh();return 100*(p.TotalProcessorTime-old).TotalSeconds/t.Elapsed.TotalSeconds/Environment.ProcessorCount;}
  public static string Run(string exe,string input,string scratch){SetProcessDPIAware();var form=new Form();form.Text="Ordinary desktop window";form.StartPosition=FormStartPosition.Manual;form.Location=new Point(70,80);form.Size=new Size(420,320);form.Show();form.Activate();wait(200);Process proc=Process.Start(new ProcessStartInfo(exe){WorkingDirectory=scratch,UseShellExecute=false});IntPtr w=IntPtr.Zero;try{
@@ -78,6 +81,7 @@ public static class DeskProbe {
  SendMessage(GetDlgItem(wb,11),0xf5,IntPtr.Zero,IntPtr.Zero);wait(100);PostMessage(GetDlgItem(wb,50),0xf5,IntPtr.Zero,IntPtr.Zero);IntPtr consent=IntPtr.Zero;check(until(()=>(consent=FindWindow("#32770",null))!=IntPtr.Zero,2500),"verified Haru did not offer explicit consent");PostMessage(consent,0x111,(IntPtr)2,IntPtr.Zero);wait(120);PostMessage(GetDlgItem(wb,50),0xf5,IntPtr.Zero,IntPtr.Zero);IntPtr again=IntPtr.Zero;check(until(()=>(again=FindWindow("#32770",null))!=IntPtr.Zero,2500),"declining still enabled the intelligent module");PostMessage(again,0x111,(IntPtr)2,IntPtr.Zero);
  SendMessage(GetDlgItem(wb,13),0xf5,IntPtr.Zero,IntPtr.Zero);wait(80);SendMessage(wb,0x201,(IntPtr)1,(IntPtr)(65+(223<<16)));SendMessage(wb,0x200,(IntPtr)1,(IntPtr)(130+(260<<16)));SendMessage(wb,0x202,IntPtr.Zero,(IntPtr)(132+(261<<16)));for(int i=0;i<21;i++)SendMessage(GetDlgItem(wb,122),0xf5,IntPtr.Zero,IntPtr.Zero);check(rows(Path.Combine(folder,"data","doodles.jsonl"))==20,"physical doodle cap failed");PostMessage(wb,0x10,IntPtr.Zero,IntPtr.Zero);wait(3400);
  SetForegroundWindow(form.Handle);SetCursorPos(source.X,source.Y);wait(1300);double idle=sample(proc,3200,null);double peak=0;SetCursorPos(reset.x,reset.y);for(int j=0;j<4;j++){click(2);wait(50);click(4);wait(75);click(2);wait(60);click(4);peak=Math.Max(peak,sample(proc,1000,null));}proc.Refresh();double rss=proc.WorkingSet64/1048576.0, high=proc.PeakWorkingSet64/1048576.0;string perf=String.Format(System.Globalization.CultureInfo.InvariantCulture,"official Haru / compatible CPU renderer: idle {0:F2}%, max sampled active 1s {1:F2}%, RSS {2:F1} MiB (peak {3:F1}), {4} logical CPUs",idle,peak,rss,high,Environment.ProcessorCount);Console.WriteLine(perf);check(idle<=3.0&&peak<=8.0&&high<=120.0,"performance gate: "+perf);PostMessage(w,0x10,IntPtr.Zero,IntPtr.Zero);check(proc.WaitForExit(4000)&&proc.ExitCode==0,"failed clean shutdown");check(File.ReadAllText(state).Contains("\"satiety\":70"),"duplicate gained satiety or first feed not saved");return perf;
+ }catch(Exception e){try{using(var b=new Bitmap(Screen.PrimaryScreen.Bounds.Width,Screen.PrimaryScreen.Bounds.Height)){using(var g=Graphics.FromImage(b)){g.CopyFromScreen(0,0,0,0,b.Size);}b.Save(Path.Combine(scratch,"fail.png"),System.Drawing.Imaging.ImageFormat.Png);}}catch{}throw new Exception(e.Message+" | fg="+cls(GetForegroundWindow()));}
  }finally{if(w!=IntPtr.Zero&&!proc.HasExited)PostMessage(w,0x10,IntPtr.Zero,IntPtr.Zero);form.Close();form.Dispose();proc.Dispose();}}
 }
 '@
