@@ -2,6 +2,8 @@
 // One OLE drop entry for every payload: snacks, model descriptors and doodle text. The shell decides the
 // flavour; the app never inspects file contents here.
 #include <windows.h>
+#include <objidl.h>
+#include <oleidl.h>
 #include <functional>
 #include <string>
 #include <vector>

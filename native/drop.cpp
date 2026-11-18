@@ -3,6 +3,7 @@
 #include <objidl.h>
 #include <oleidl.h>
 #include <shlobj.h>
+#include <shellapi.h>
 namespace pet {
 namespace {
 class Target final : public IDropTarget {
