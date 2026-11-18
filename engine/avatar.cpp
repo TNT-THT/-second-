@@ -85,7 +85,7 @@ struct Avatar::Impl {
     ::operator delete(mocMem, std::align_val_t(64));
   }
   bool open(ModelResources &v) {
-    auto bytes = v.original("Haru.model3.json", 256 * 1024);
+    auto bytes = v.original(v.manifest, 256 * 1024);
     if (bytes.empty())
       return false;
     auto j = nlohmann::json::parse(bytes);
@@ -98,7 +98,7 @@ struct Avatar::Impl {
     auto buf = v.original(refs.at("Moc").get<std::string>(), 8 * 1024 * 1024);
     if (buf.size() < 64)
       return false;
-    if (sha256({(const char *)buf.data(), buf.size()}) != haruSha)
+    if (v.pin.empty() || sha256({(const char *)buf.data(), buf.size()}) != v.pin)
       return false;
     auto n = unsigned(buf.size());
     mocSize = n;
@@ -143,7 +143,8 @@ struct Avatar::Impl {
     for (int i = 0; i < csmGetParameterCount(m); ++i)
       params[csmGetParameterIds(m)[i]] = i;
     baseline = sha256({(const char *)mocMem, mocSize});
-    auto phys = v.original("Haru.physics3.json", 65536);
+    // The manifest names its own physics document; no model-specific file name here.
+    auto phys = v.original(refs.value("Physics", std::string()), 65536);
     if (!phys.empty()) {
       auto doc = nlohmann::json::parse(phys);
       for (auto &group : doc.at("PhysicsSettings"))

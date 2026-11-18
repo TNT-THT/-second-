@@ -13,7 +13,7 @@
 
 本次自动验证的逐项结果见 [docs/RELEASE.md](RELEASE.md)。
 
-**开发复现**：CMake 3.20+，Windows 10/11 x64 + VS 2022。`cmake -S . -B build -A x64`，`cmake --build build --config Release`，`ctest --test-dir build -C Release --output-on-failure`，`python tools/package.py build/Release/PetDesk.exe`。开发 HUD 需单独 `-DPET_DEV=ON`，发行版不带其热键或状态读取。Linux 可编译规则和同一 CPU 模型内核，`python tests/render_haru.py build/avatar_test`（测试工具需要 Pillow），`python tests/compat.py`，`python tools/audit.py`。
+**开发复现**：CMake 3.20+，Windows 10/11 x64 + VS 2022。`cmake -S . -B build -A x64`，`cmake --build build --config Release`，`ctest --test-dir build -C Release --output-on-failure`，`python tools/package.py build/Release/PetDesk.exe`。开发 HUD 需单独 `-DPET_DEV=ON`，发行版不带其热键或状态读取。Linux 可编译规则和同一 CPU 模型内核，`python tests/render_generic.py build/avatar_test`（测试工具需要 Pillow），`python tests/compat.py`，`python tools/audit.py`。
 
 `python tools/model_compatibility_check.py assets/models/haru/Haru.model3.json --policy config/policy.json` 列出匹配/缺失/物理目标。`tools/haru-lock.json` 保留逐文件 SHA-256；打包校验所有原件和原始声明。三类残缺描述符放在 `tests/fixtures/`，不会打包成角色。`tools/bake_tracks.py` 可复现动作表。ONNX 编译器 `tools/compile_intents.py` 需要开发机安装 numpy、onnx、onnxruntime；桌宠不需要。
 

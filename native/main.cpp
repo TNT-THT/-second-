@@ -686,13 +686,14 @@ struct App {
       }
       return 0;
     case WM_ENDSESSION:
-      if (wp && !(lp & ENDSESSION_LOGOFF)) {
+      // ENDSESSION_CLOSEAPP is what an update/installer restart sends; a plain logoff is not a reboot.
+      if (wp && (lp & ENDSESSION_CLOSEAPP)) {
         life.s.returnAfterShutdown = true;
         life.save(wallTime());
       }
       return 0;
     case WM_QUERYENDSESSION:
-      if (!(lp & ENDSESSION_LOGOFF)) {
+      if (lp & ENDSESSION_CLOSEAPP) {
         s.farewell();
         frame();
       }

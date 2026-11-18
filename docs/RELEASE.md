@@ -1,12 +1,12 @@
 # 本次 Windows 验证记录（Haru 2.0 本地测试版）
 
-自动流水线在 GitHub 托管的 `windows-latest` 上、对**本目录对应的提交**执行；结果可在 Actions 的 “Haru native desktop” 运行中复查；下载包由同一次运行附加到草稿发布。
+自动流水线在 GitHub 托管的 `windows-latest` 上、对**本目录对应的提交**执行；结果可在 Actions 的 “Haru native desktop” 运行中复查；下载包由同一次运行发布为 pre-release。
 
 | 项 | 实际执行的检查 | 结果 |
 |---|---|---|
 | 构建 | MSVC x64 Release（静态 CRT），`pet_rules` / `pet_avatar` / `pet_vault` / `PetDesk` / `avatar_test` / `vault_test` | 通过 |
 | 规则与日志 | `rules_test` 34 组；`vault_test` 锁、追加、恢复、哨兵 | 通过 |
-| 真实模型 | 官方 `Haru.moc3` + 两张图集渲染三帧不同网格；翻转 MOC 字节后拒绝加载 | 通过 |
+| 真实模型 | 官方 `Haru.moc3` 与 `Hiyori.moc3` 各自渲染三帧不同网格，并断言各自物理绑定（Haru: `sidelock` 有/`skirt` 无；Hiyori: 反之）；翻转 MOC 字节后拒绝加载 | 通过 |
 | 发行审计 | 源码守卫、Haru 逐文件 SHA-256、PE 导入表与 `asInvoker` 清单、ZIP 校验与 SHA-256 | 通过 |
 | 解压运行 | 从 ZIP 解压后启动真实进程；椭圆命中、透明留白不拦截、右键菜单、系统文件选择器打开并取消 | 通过 |
 | 投喂 | 真实 OLE `CF_HDROP` 两次投喂同一文件：两条元数据记录、原件字节不变、24h 内不重复加饱食度 | 通过 |
@@ -21,4 +21,4 @@
 - 高 DPI、多显示器、触控笔、真实 Windows Update 重启、笔记本电池、实际音频会话、中文/英文输入法切换、真实蓝光滤镜，都未在本次 CI 中出现；相应适配器逻辑存在，但需要在这些设备上亲测。
 - 语音备忘依赖未随包分发的 whisper.cpp 与已核验 tiny 权重；本包不包含，也不会打开麦克风。
 - 天气需要用户或本机程序提供 `config/weather.json`；没有联网城市天气查询。
-- 未执行：ONNX 官方量化 + 目标机 1000 样本校准、十种来源模型指纹盲测、非技术用户盲测、VirusTotal 多引擎扫描。
+- 未执行：ONNX 官方量化 + 目标机 1000 样本校准、十种来源模型指纹盲测（目前是 2 个真实官方模型 + 3 个刻意残缺的描述符）、非技术用户盲测、VirusTotal 多引擎扫描。

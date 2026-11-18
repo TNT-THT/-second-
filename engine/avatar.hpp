@@ -1,4 +1,5 @@
 #pragma once
+#include "haru_lock.hpp"
 #include "scene.hpp"
 #include <functional>
 #include <memory>
@@ -12,6 +13,8 @@ struct ModelResources {
   std::function<bool(std::string_view, Texture &, size_t &)> texture;
   std::vector<uint8_t> tracks;
   std::string mapping;
+  // Release keeps the upstream pins; only an isolated test binary supplies another official model.
+  std::string manifest = "Haru.model3.json", pin = haruSha;
 };
 class Avatar {
   struct Impl;

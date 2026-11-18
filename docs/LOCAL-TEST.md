@@ -10,4 +10,6 @@
 6. **可选感知**：音量仅峰值/静音、输入法仅语言与模式、色温仅 gamma 表；默认关闭。洛谷和全局输入次数分别授权。天气需本机提供城市和 WMO 天气码：见仓库 `docs/BOUNDARIES.md`。当前公开包**没有 Whisper 权重或识别后端，不会打开麦克风**。没有设备或不适用的系统信号不会弹技术错误。
 7. **看数据**：`data/feed_log.jsonl` 只有 UTC `ts`、8 位元数据 `hash` 与 `type`。`state.jsonl` 每 5 秒活动时间和变化时追加；不覆盖/轮转。工作台设置也仅追加本机私有记录。退出后再启动可验证恢复；被截断的最后一条不会抹掉之前的记录。不要把新 EXE 覆盖进旧 1.x 目录；旧版不是这条安全路径。
 
+天气示例：把 `config/weather.example.json` 复制成 `config/weather.json` 并改成你所在的城市与 WMO 天气码（61 = 小雨），保存后 24 小时内使用缓存结果。
+
 模型来源：Live2D 官方 Native Samples `4-r.7`，完整声明见 `assets/models/haru/LICENSE`、`NOTICE.md` 和 `readme.txt`。当前可执行文件使用开源 **Purism Core** 直接求解真实 MOC3 网格，而非冒充官方专有 Core。模型自身没有中性表情文件、裙摆物理目标或春节换装；不会伪造这些资源。请遵守模型单独的素材及角色条款。

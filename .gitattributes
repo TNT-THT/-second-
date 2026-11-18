@@ -7,3 +7,4 @@ assets/models/haru/** -text
 *.lut binary
 *.bgra binary
 *.onnx binary
+tests/models/** -text

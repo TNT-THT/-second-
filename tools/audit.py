@@ -25,6 +25,10 @@ def source():
     require('PROCESS_QUERY_LIMITED_INFORMATION' in (root/'native/main.cpp').read_text(),'foreground process rights not bounded')
     for rel,digest in json.loads((root/'tools/haru-lock.json').read_text()).items():
         p=root/'assets/models/haru'/rel;require(p.is_file() and hashlib.sha256(p.read_bytes()).hexdigest()==digest,'changed/missing Haru original '+rel)
+    require('Haru.' not in (root/'engine/avatar.cpp').read_text(),'model-specific file name leaked into the generic avatar engine')
+    require('pin = haruSha' in (root/'engine/avatar.hpp').read_text(),'release no longer defaults to the pinned upstream MOC')
+    require("'tests'" not in (root/'tools/package.py').read_text(),'test models must never be packaged')
+    require((root/'tests/models/hiyori/LICENSE.md').is_file(),'second test model lost its upstream notice')
     require((root/'vendor/purism/core.c').is_file() and not (root/'vendor/purism/core.cpp').exists(),'vendored core must build as C for MSVC')
     require('FILE_APPEND_DATA' in vault and 'OPEN_ALWAYS' in vault and 'nNumberOfLinks' in vault and 'FILE_FLAG_OPEN_REPARSE_POINT' in vault,'missing confinement guards')
     cfg=json.loads((root/'config/settings.json').read_text());require(cfg=={'luogu':False,'input_counts':False,'birthday':''},'not opt-out by default')
