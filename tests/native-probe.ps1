@@ -58,10 +58,19 @@ public static class DeskProbe {
   foreach(AutomationElement e in items){string n=e.Current.Name;if(n!=null&&n.StartsWith(prefix)){((InvokePattern)e.GetCurrentPattern(InvokePattern.Pattern)).Invoke();return true;}}
   return false;
  }
+ static string g_dump="";
  static bool setFileName(IntPtr dialog,string file){
   var root=AutomationElement.FromHandle(dialog);
-  var ed=root.FindFirst(TreeScope.Descendants,new PropertyCondition(AutomationElement.ControlTypeProperty,ControlType.Edit));
-  if(ed==null)return false;((ValuePattern)ed.GetCurrentPattern(ValuePattern.Pattern)).SetValue(file);return true;
+  var all=root.FindAll(TreeScope.Descendants,Condition.TrueCondition);
+  AutomationElement target=null;int i=0;
+  foreach(AutomationElement e in all){
+   object vp=null;try{vp=e.GetCurrentPattern(ValuePattern.Pattern);}catch{}
+   if(i++<24)g_dump+=e.Current.ControlType.ProgrammaticName+":"+e.Current.Name+":"+e.Current.AutomationId+(vp!=null?"+V":"")+";";
+   if(target==null&&vp!=null&&e.Current.ControlType==ControlType.Edit)target=e;
+  }
+  if(target==null)foreach(AutomationElement e in all){try{var vp=(ValuePattern)e.GetCurrentPattern(ValuePattern.Pattern);if(!e.Current.IsReadOnly){target=e;break;}}catch{}}
+  if(target==null)return false;
+  ((ValuePattern)target.GetCurrentPattern(ValuePattern.Pattern)).SetValue(file);return true;
  }
  static void picker(IntPtr w,string file){
   string why="";
@@ -70,7 +79,7 @@ public static class DeskProbe {
    if(!until(()=>FindWindow("#32768",null)!=IntPtr.Zero,2500)){why+="nomenu;";wait(400);continue;}
    if(!invokeMenu("投喂")){why+="noitem;";SendKeys.SendWait("{ESC}");wait(400);continue;}
    IntPtr dialog=IntPtr.Zero;if(!until(()=>(dialog=FindWindow("#32770",null))!=IntPtr.Zero,9000)){why+="nodlg;";wait(500);continue;}
-   if(!setFileName(dialog,file)){why+="noedit;";PostMessage(dialog,0x10,IntPtr.Zero,IntPtr.Zero);wait(500);continue;}
+   if(!setFileName(dialog,file)){why+="noedit["+g_dump+"];";PostMessage(dialog,0x10,IntPtr.Zero,IntPtr.Zero);wait(500);continue;}
    wait(250);PostMessage(dialog,0x111,(IntPtr)1,IntPtr.Zero);
    check(until(()=>FindWindow("#32770",null)==IntPtr.Zero,6000),"picker did not accept the whitelisted path");return;
   }
