@@ -1,6 +1,6 @@
 # 本次 Windows 验证记录（Haru 2.0 本地测试版）
 
-自动流水线在 GitHub 托管的 `windows-latest` 上、对**本目录对应的提交**执行；结果可在 Actions 的 “Haru native desktop” 运行中复查。
+自动流水线在 GitHub 托管的 `windows-latest` 上、对**本目录对应的提交**执行；结果可在 Actions 的 “Haru native desktop” 运行中复查；下载包由同一次运行附加到草稿发布。
 
 | 项 | 实际执行的检查 | 结果 |
 |---|---|---|
