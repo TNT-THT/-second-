@@ -40,7 +40,19 @@ public static class DeskProbe {
  static int ht(IntPtr w,P p){return (int)SendMessage(w,0x84,IntPtr.Zero,(IntPtr)((p.x&65535)|(p.y<<16)));}
  static void click(int flag){mouse_event((uint)flag,0,0,0,UIntPtr.Zero);}
  static int rows(string p){using(var f=new FileStream(p,FileMode.Open,FileAccess.Read,FileShare.ReadWrite))using(var r=new StreamReader(f)) {int n=0;while(r.ReadLine()!=null)n++;return n;}}
- static void picker(IntPtr w,string file){P p=waist(w);SetCursorPos(p.x,p.y);wait(80);click(8);wait(100);click(16);check(until(()=>FindWindow("#32768",null)!=IntPtr.Zero,3000),"OS did not open the context menu");SendKeys.SendWait("{HOME}{ENTER}");IntPtr dialog=IntPtr.Zero;check(until(()=> (dialog=FindWindow("#32770",null))!=IntPtr.Zero,4500),"no system file picker");SetForegroundWindow(dialog);wait(250);IntPtr field=IntPtr.Zero;check(until(()=>(field=edit(dialog))!=IntPtr.Zero,2500),"no picker filename edit");SendMessage(field,0x0c,IntPtr.Zero,file);wait(120);PostMessage(dialog,0x111,(IntPtr)1,IntPtr.Zero);check(until(()=>FindWindow("#32770",null)==IntPtr.Zero,4500),"picker did not accept the whitelisted path");}
+ static void picker(IntPtr w,string file){
+  for(int attempt=0;attempt<3;attempt++){
+   P p=waist(w);SetCursorPos(p.x,p.y);wait(120);click(8);wait(150);click(16);
+   if(!until(()=>FindWindow("#32768",null)!=IntPtr.Zero,2500)){SendKeys.SendWait("{ESC}");wait(300);continue;}
+   SendKeys.SendWait("{DOWN}{ENTER}");IntPtr dialog=IntPtr.Zero;
+   if(!until(()=>(dialog=FindWindow("#32770",null))!=IntPtr.Zero,5000)){SendKeys.SendWait("{ESC}");wait(300);continue;}
+   SetForegroundWindow(dialog);wait(300);IntPtr field=IntPtr.Zero;
+   if(!until(()=>(field=edit(dialog))!=IntPtr.Zero,2500)){PostMessage(dialog,0x10,IntPtr.Zero,IntPtr.Zero);wait(300);continue;}
+   SendMessage(field,0x0c,IntPtr.Zero,file);wait(150);PostMessage(dialog,0x111,(IntPtr)1,IntPtr.Zero);
+   check(until(()=>FindWindow("#32770",null)==IntPtr.Zero,4500),"picker did not accept the whitelisted path");return;
+  }
+  check(false,"no system file picker");
+ }
  static double sample(Process p,int ms,Action<float> drive){p.Refresh();TimeSpan old=p.TotalProcessorTime;var t=Stopwatch.StartNew();while(t.ElapsedMilliseconds<ms){if(drive!=null)drive(t.ElapsedMilliseconds/(float)ms);wait(40);}p.Refresh();return 100*(p.TotalProcessorTime-old).TotalSeconds/t.Elapsed.TotalSeconds/Environment.ProcessorCount;}
  public static string Run(string exe,string input,string scratch){SetProcessDPIAware();var form=new Form();form.Text="Ordinary desktop window";form.StartPosition=FormStartPosition.Manual;form.Location=new Point(70,80);form.Size=new Size(420,320);form.Show();form.Activate();wait(200);Process proc=Process.Start(new ProcessStartInfo(exe){WorkingDirectory=scratch,UseShellExecute=false});IntPtr w=IntPtr.Zero;try{
  check(until(()=> (w=FindWindow("DeskCompanion.Native.2",null))!=IntPtr.Zero,5000),"release window did not launch");wait(700);P p=waist(w);check(ht(w,p)==1&&ht(w,new P(p.x+32,p.y))==-1,"ellipse is not the actual 60px target");SetCursorPos(p.x,p.y);wait(100);check(WindowFromPoint(p)==w,"real cursor missed layered pet");check(WindowFromPoint(new P(p.x+90,p.y+10))!=w,"transparent padding intercepts work");
