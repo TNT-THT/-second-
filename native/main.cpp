@@ -639,13 +639,10 @@ struct App {
   void consent() {
     if (askedRecycle || !limits.recycle)
       return;
+    // Never a modal dialog: the desktop pet must not steal focus, and an automated probe would hang on
+    // it. A one-time bubble points at the right-click switch; until it is on we keep metadata only.
     askedRecycle = true;
-    auto text = L"投喂后，可以把你给的那一份小点心移到系统回收站吗？\n"
-                L"我会保留「时间_原文件名」，你在回收站里随时能还原。\n"
-                L"不同意也可以：那样我只记住名字与大小，不碰你的文件。";
-    recycleConsent = MessageBoxW(hwnd, text, L"Haru · 投喂方式", MB_YESNO | MB_ICONQUESTION | MB_DEFBUTTON1) == IDYES;
-    files.note(Note::models, std::string("{\"kind\":\"consent\",\"recycle\":") +
-                                 (recycleConsent ? "true}" : "false}"));
+    s.talk(L"想让我把吃过的那一份放进回收站吗？右键 →“投喂后把小点心移到回收站”", 7000);
   }
   bool validDrop(const std::wstring &path) const {
     auto dot = path.rfind(L'.');
