@@ -79,6 +79,8 @@ struct Scene {
   bool mute = false, drag = false, lateWork = false;
   int replies = 0;
   std::vector<std::wstring> lines;
+  // Wording comes from config/feed_limits.json; the scene never invents a limit on its own.
+  std::wstring heavyLine = L"这个太重了吃不下…";
   explicit Scene(Life &, uint32_t seed);
   void init(World, sec);
   void tick(ms dt, sec, World);

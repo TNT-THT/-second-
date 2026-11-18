@@ -2,6 +2,7 @@
 assets/models/haru/** -text
 *.png binary
 *.moc3 binary
+assets/models/builtin/** -text
 *.wav binary
 *.pcm binary
 *.lut binary

@@ -193,10 +193,11 @@ struct Avatar::Impl {
       }
     if (!decodeTracks(v.tracks))
       return false;
-    cloth.resize(count);
+    cloth.assign(count, false);
     auto parent = csmGetDrawableParentPartIndices(m);
+    int clothRoot = v.clothPart.empty() ? -1 : part(v.clothPart);
     for (int i : order)
-      cloth[i] = parent[i] == part("Part01Body001");
+      cloth[i] = clothRoot >= 0 && parent[i] == clothRoot;
     csmReadCanvasInfo(m, &size, &origin, &unit);
     return size.Y > 0 && size.X > 0 && unit > 0;
   }

@@ -1,6 +1,11 @@
 #include "vault.hpp"
+#include "feed.hpp"
 #include <algorithm>
 #include <array>
+#include <shobjidl.h>
+#include <wrl/client.h>
+#include <cstdio>
+using Microsoft::WRL::ComPtr;
 namespace pet {
 std::string utf8(std::wstring_view w) {
   if (w.empty() || w.size() > 1048576)
@@ -72,10 +77,11 @@ std::optional<FoodMeta> inspectFood(std::wstring_view path) {
   auto u = utf8(lower);
   if (u.empty())
     return {};
-  return FoodMeta{
-      fingerprint(u, (uint64_t(a.nFileSizeHigh) << 32) | a.nFileSizeLow,
-                  (uint64_t(a.ftLastWriteTime.dwHighDateTime) << 32) | a.ftLastWriteTime.dwLowDateTime),
-      *e};
+  uint64_t size = (uint64_t(a.nFileSizeHigh) << 32) | a.nFileSizeLow;
+  return FoodMeta{fingerprint(u, size,
+                              (uint64_t(a.ftLastWriteTime.dwHighDateTime) << 32) |
+                                  a.ftLastWriteTime.dwLowDateTime),
+                  *e, size, p};
 }
 static std::wstring finalName(HANDLE h) {
   std::wstring p(32768, L' ');
@@ -147,11 +153,6 @@ Vault::Vault(std::wstring path) {
   assets = directory(root.path + L"\\assets");
   if (assets.guard) {
     models = directory(assets.path + L"\\models");
-    if (models.guard) {
-      haru = directory(models.path + L"\\haru");
-      if (haru.guard)
-        textures = directory(haru.path + L"\\Haru.2048");
-    }
   }
   config = directory(root.path + L"\\config");
   auto d = root.path + L"\\data";
@@ -314,27 +315,120 @@ bool Vault::snapshot(const State &s) {
   }
   return true;
 }
+bool Vault::useModel(std::string_view rel) {
+  model = {};
+  activeDir.clear();
+  subdirs.clear();
+  if (!root.guard || rel.empty() || rel.size() > 160 || rel.front() == '/' || rel.front() == '\\' ||
+      rel.find(':') != rel.npos || rel.find("..") != rel.npos || rel.find('\0') != rel.npos)
+    return false;
+  auto w = wide(rel);
+  if (diskPath(w) && w.size() <= 32760) {
+    // An imported model may live outside the app folder; the user picked it explicitly and we only read it.
+    auto d = directory(w);
+    if (!d.guard)
+      return false;
+    model = std::move(d);
+    activeDir = model.path;
+    return true;
+  }
+  std::wstring path = root.path;
+  size_t from = 0;
+  int depth = 0;
+  while (from <= w.size() && depth < 5) {
+    auto at = w.find(L'\\', from);
+    auto part = w.substr(from, at == std::wstring::npos ? std::wstring::npos : at - from);
+    if (!leaf(part))
+      return false;
+    path += L"\\" + part;
+    ++depth;
+    if (at == std::wstring::npos)
+      break;
+    from = at + 1;
+  }
+  auto d = directory(path);
+  if (!d.guard || depth > 4)
+    return false;
+  model = std::move(d);
+  activeDir = model.path;
+  return true;
+}
+const Vault::Dir *Vault::modelDirFor(std::string_view p, std::wstring &leafName) const {
+  if (!model.guard || p.empty() || p.size() > 200 || p.find("..") != p.npos || p.find(':') != p.npos)
+    return nullptr;
+  auto slash = p.find('/');
+  if (slash == std::string::npos) {
+    leafName = wide(p);
+    return &model;
+  }
+  auto dirName = wide(p.substr(0, slash));
+  auto file = wide(p.substr(slash + 1));
+  if (!leaf(dirName) || file.empty() || file.find(L'/') != std::wstring::npos)
+    return nullptr;
+  for (auto &s : subdirs)
+    if (s.first == dirName) {
+      leafName = file;
+      return &s.second;
+    }
+  auto d = directory(model.path + L"\\" + dirName);
+  if (!d.guard)
+    return nullptr;
+  subdirs.emplace_back(dirName, std::move(d));
+  leafName = file;
+  return &subdirs.back().second;
+}
 std::vector<uint8_t> Vault::modelAsset(std::string_view p, size_t cap) const {
-  constexpr std::string_view prefix = "Haru.2048/";
-  if (p.substr(0, prefix.size()) == prefix)
-    return bytes(textures, wide(p.substr(prefix.size())), cap);
-  return bytes(haru, wide(p), cap);
+  std::wstring name;
+  auto d = modelDirFor(p, name);
+  return d ? bytes(*d, name, cap) : std::vector<uint8_t>{};
+}
+bool Vault::modelHas(std::string_view p) const {
+  std::wstring name;
+  auto d = modelDirFor(p, name);
+  // Existence and regularity only: the handle is opened read-only and nothing is read.
+  return d && readOnly(*d, name);
+}
+std::string Vault::feedLimits() const {
+  auto b = bytes(config, L"feed_limits.json", 4096);
+  return {b.begin(), b.end()};
+}
+std::wstring Vault::recycle(std::wstring_view path, std::string_view stamp) {
+  if (path.empty() || path.size() > 32760 || !leaf(path.substr(path.rfind(L'\\') + 1)))
+    return {};
+  const std::wstring name = wide(trashStamp(stamp, utf8(path.substr(path.rfind(L'\\') + 1))));
+  if (name.empty())
+    return {};
+  ComPtr<IFileOperation> op;
+  if (FAILED(CoCreateInstance(CLSID_FileOperation, nullptr, CLSCTX_ALL, IID_PPV_ARGS(op.GetAddressOf()))))
+    return {};
+  // Undo keeps the bin entry; no prompts and no UI because the pet must never steal focus.
+  op->SetOperationFlags(FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_SILENT | FOF_NO_UI);
+  ComPtr<IShellItem> item;
+  if (FAILED(SHCreateItemFromParsingName(std::wstring(path).c_str(), nullptr, IID_PPV_ARGS(item.GetAddressOf()))))
+    return {};
+  if (FAILED(op->SetName(item.Get(), name.c_str())) || FAILED(op->DeleteItem(item.Get(), nullptr)) ||
+      FAILED(op->PerformOperations()))
+    return {};
+  BOOL aborted = TRUE;
+  if (FAILED(op->GetAnyOperationsAborted(&aborted)) || aborted)
+    return {};
+  return name;
 }
 std::string Vault::setting(const wchar_t *n, size_t cap) const {
   auto b = bytes(config, n, cap);
   return {b.begin(), b.end()};
 }
 static constexpr const wchar_t *names[] = {L"preferences.jsonl", L"doodles.jsonl", L"memo_hashes.jsonl",
-                                           L"weather.jsonl", L"style.jsonl"};
+                                           L"weather.jsonl", L"style.jsonl", L"models.jsonl"};
 bool Vault::note(Note k, const std::string &line) {
-  if (unsigned(k) >= 5 || line.empty() || line.size() > 2048 || line.find_first_of("\r\n") != line.npos)
+  if (unsigned(k) >= 6 || line.empty() || line.size() > 2048 || line.find_first_of("\r\n") != line.npos)
     return false;
   auto file = stream(data, names[unsigned(k)]);
   return append(file, line).has_value();
 }
 std::vector<std::string> Vault::notes(Note k, size_t limit) const {
   std::vector<std::string> lines;
-  if (unsigned(k) >= 5)
+  if (unsigned(k) >= 6)
     return lines;
   auto file = readOnly(data, names[unsigned(k)]);
   LARGE_INTEGER sz{};
@@ -369,5 +463,16 @@ std::vector<std::string> Vault::notes(Note k, size_t limit) const {
     take();
   std::reverse(lines.begin(), lines.end());
   return lines;
+}
+std::string localStamp() {
+  SYSTEMTIME t{};
+  GetLocalTime(&t);
+  char b[32];
+  std::snprintf(b, sizeof b, "%04u-%02u-%02u %02u:%02u:%02u", t.wYear, t.wMonth, t.wDay, t.wHour, t.wMinute,
+                t.wSecond);
+  return b;
+}
+std::string Vault::recycle(std::wstring_view path) {
+  return utf8(recycle(path, localStamp()));
 }
 } // namespace pet

@@ -182,6 +182,11 @@ struct Workbench::Impl {
     }
     InvalidateRect(win, nullptr, TRUE);
   }
+  void switched(const std::string &name, unsigned long long took) {
+    notice = L"已切换到 " + wide(name) + L" · " + std::to_wstring(took) + L" ms";
+    if (win)
+      InvalidateRect(win, nullptr, TRUE);
+  }
   void show(Page target) {
     page = target;
     notice.clear();
@@ -606,6 +611,9 @@ Workbench::Workbench(Scene &s, Vault &v, View &w, Apply a, std::function<std::ws
 Workbench::~Workbench() = default;
 void Workbench::show(Page page) {
   p->show(page);
+}
+void Workbench::switched(const std::string &name, unsigned long long took) {
+  p->switched(name, took);
 }
 void Workbench::close() {
   if (p->win)

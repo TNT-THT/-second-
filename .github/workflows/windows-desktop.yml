@@ -60,7 +60,7 @@ jobs:
       - name: Publish these exact artifacts as a pre-release at the tested commit
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: petdesk-v2.0.0-haru-preview.2
+          TAG: petdesk-v2.0.0-haru-preview.3
         run: |
           set -eu
           if gh release view "$TAG" >/dev/null 2>&1; then echo "$TAG already exists; leaving workflow artifacts."; exit 0; fi

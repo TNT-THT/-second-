@@ -1,9 +1,14 @@
 #include "rules.hpp"
+#include "feed.hpp"
+#include "layout.hpp"
+#include "models.hpp"
 #include "scene.hpp"
 #include <cstdio>
 #include <cstdlib>
 #include <ctime>
+#include <algorithm>
 #include <functional>
+#include <map>
 #include <stdexcept>
 using namespace pet;
 #define CHECK(x)                                                                                             \
@@ -467,6 +472,120 @@ int main() {
     Scene next(a.l, 12);
     next.init(a.w, base());
     CHECK(next.caption() == L"等你好久啦" && !a.l.s.returnAfterShutdown);
+  });
+
+  test("feed limits default to 50 MiB and reject bad configuration", [] {
+    auto d = parseFeedLimits("{}");
+    CHECK(d && d->maxBytes == 52428800ull && d->recycle);
+    CHECK(feedVerdict(52428800ull, *d) == FeedVerdict::ok);
+    CHECK(feedVerdict(52428801ull, *d) == FeedVerdict::tooBig);
+    auto c = parseFeedLimits("{\"max_bytes\":1024,\"recycle\":false,\"failed_line\":\"搬不动\",\"heavy_line\":\"太沉\"}");
+    CHECK(c && c->maxBytes == 1024 && !c->recycle && c->failedLine == "搬不动" && c->heavyLine == "太沉");
+    CHECK(!parseFeedLimits("[]"));
+    CHECK(!parseFeedLimits("{\"max_bytes\":1023}"));
+    CHECK(!parseFeedLimits("{\"max_bytes\":8589934593}"));
+    CHECK(!parseFeedLimits("{\"max_bytes\":\"50\"}"));
+    CHECK(!parseFeedLimits("{\"recycle\":1}"));
+    CHECK(!parseFeedLimits("{\"heavy_line\":\"a\r\nb\"}"));
+    CHECK(!parseFeedLimits("{\"failed_line\":\"\"}"));
+    CHECK(!parseFeedLimits("{\"failed_line\":\"\r\n\"}"));
+    CHECK(trashStamp("2026-11-18 11:51:09", "cake.png") == "2026-11-18T11-51-09_cake.png");
+    CHECK(trashStamp("", "cake.png") == "cake.png");
+  });
+  test("bubbles stay fully inside the work area and keep the tip on the box", [] {
+    RectI work{0, 0, 1920, 1040};
+    auto a = placeBubble(work, 400, 600, 220, 64);
+    CHECK(!a.below);
+    CHECK(a.box.l >= 6 && a.box.r <= 1914 && a.box.t >= 6 && a.box.b <= 1034);
+    CHECK(a.box.b <= 600 - 8 + 1 && a.tipX >= a.box.l + 18 && a.tipX <= a.box.r - 18);
+    auto top = placeBubble(work, 400, 20, 220, 64);
+    CHECK(top.below && top.box.t >= 28);
+    auto edge = placeBubble(work, 1900, 600, 240, 64);
+    CHECK(edge.box.r <= 1914 && edge.tipX <= edge.box.r - 18);
+    auto left = placeBubble(work, -120, 300, 220, 64);
+    CHECK(left.box.l >= 6 && left.tipX >= left.box.l + 18);
+    RectI negative{-1920, -200, 0, 880};
+    auto n = placeBubble(negative, -100, 300, 220, 64);
+    CHECK(n.box.l >= -1914 && n.box.r <= -6 && n.box.b <= 880 - 6 && n.tipX >= n.box.l + 18);
+    auto tiny = placeBubble(RectI{0, 0, 100, 40}, 50, 20, 300, 90);
+    CHECK(tiny.box.r <= 94 && tiny.box.b <= 34 && tiny.box.width() == 88 && tiny.box.height() == 28);
+    auto wide = placeBubble(RectI{0, 0, 120, 900}, 60, 880, 200, 60);
+    CHECK(wide.below == false && wide.box.b <= 894);
+  });
+  test("model inspection names missing files and only binds real channels", [] {
+    auto files = std::map<std::string, std::string>{
+        {"Haru.model3.json", R"({"FileReferences":{"Moc":"Haru.moc3",
+          "Textures":["Haru.2048/texture_00.png"],
+          "Physics":"Haru.physics3.json",
+          "Expressions":[{"Name":"F01","File":"exp/F01.exp3.json"}]}})"},
+        {"Haru.cdi3.json", R"({"Parameters":[{"Id":"ParamAngleX"},{"Id":"ParamAngleY"},
+          {"Id":"ParamAngleZ"},{"Id":"ParamBreath"},{"Id":"ParamBodyAngleZ"},
+          {"Id":"ParamHairFront"},{"Id":"ParamHandDhangeL"}]})"},
+        {"Haru.physics3.json", R"({"PhysicsSettings":[{"Output":[
+          {"Destination":{"Id":"ParamHairFront"}},
+          {"Destination":{"Id":"ParamAngleZ"}}]}]})"},
+        {"Haru.moc3", "moc"},
+        {"Haru.2048/texture_00.png", "png"},
+        {"exp/F01.exp3.json", "exp"}};
+    auto read = [&](std::string_view p) -> std::optional<std::string> {
+      auto it = files.find(std::string(p));
+      return it == files.end() ? std::nullopt : std::optional<std::string>(it->second);
+    };
+    const char *mapping = R"({"channels":{
+      "head_tilt":["ParamAngleX","ParamAngleY","ParamAngleZ"],
+      "breath":["ParamBreath"],
+      "body_sway":["ParamBodyAngleZ"],
+      "fringe":["ParamHairFront"],
+      "sidelock":["ParamHairSide"],
+      "skirt":["ParamSkirt"],
+      "hand":["ParamHandDhangeL"]}})";
+    auto adapter = parseAdapter(R"({"cloth_part":"Part01Body001","expressions":{"smile":"F02"}})");
+    CHECK(adapter && adapter->clothPart == "Part01Body001" && adapter->expressions.size() == 1);
+    auto full = inspectModel(read, "Haru.model3.json", R"({"cloth_part":"Part01Body001"})", mapping);
+    CHECK(full.missingFiles.empty() && full.channels == 5 && full.usable());
+    CHECK(full.fingerprint.size() == 16);
+    CHECK(std::find(full.missingChannels.begin(), full.missingChannels.end(), "sidelock") != full.missingChannels.end());
+    CHECK(std::find(full.notes.begin(), full.notes.end(), "adapter expression missing: smile") == full.notes.end());
+    files.erase("Haru.physics3.json");
+    auto broken = inspectModel(read, "Haru.model3.json", R"({"expressions":{"smile":"F02"}})", mapping);
+    CHECK(std::find(broken.missingFiles.begin(), broken.missingFiles.end(), "Haru.physics3.json") !=
+          broken.missingFiles.end());
+    CHECK(!broken.usable());
+    auto bare = std::map<std::string, std::string>{
+        {"Mark.model3.json", R"({"FileReferences":{"Moc":"Mark.moc3","Textures":["Mark.1024/texture_00.png"]}})"},
+        {"Mark.cdi3.json", R"({"Parameters":[{"Id":"ParamAngleX"},{"Id":"ParamAngleZ"},{"Id":"ParamBreath"}]})"},
+        {"Mark.moc3", "moc"}, {"Mark.1024/texture_00.png", "png"}};
+    auto bareRead = [&](std::string_view p) -> std::optional<std::string> {
+      auto it = bare.find(std::string(p));
+      return it == bare.end() ? std::nullopt : std::optional<std::string>(it->second);
+    };
+    auto mark = inspectModel(bareRead, "Mark.model3.json", "{}", mapping);
+    CHECK(mark.missingFiles.empty() && mark.channels == 2 && !mark.usable());
+    CHECK(std::find(mark.notes.begin(), mark.notes.end(), "no physics document") != mark.notes.end());
+    auto absent = inspectModel(bareRead, "Nope.model3.json", "{}", mapping);
+    CHECK(absent.missingFiles.size() == 1 && !absent.usable());
+    auto registry = parseModels(R"({"models":[{"id":"haru","name":"Haru","dir":"assets/models/haru",
+      "manifest":"Haru.model3.json","moc":"Haru.moc3",
+      "sha256":"aa59f7a3dc3b30b23b5f10afd9192ed755e4d01dc9a12442d99b972a418e2543",
+      "license":"assets/models/haru/LICENSE","adapter":{"cloth_part":"Part01Body001"}},
+      {"id":"mark","name":"Mark","dir":"assets/models/builtin/mark","manifest":"Mark.model3.json",
+      "moc":"Mark.moc3","sha256":"f6351429bd3d0000000000000000000000000000000000000000000000000000",
+      "builtin":false}]})");
+    CHECK(registry && registry->size() == 2 && (*registry)[0].adapter.clothPart == "Part01Body001");
+    auto imported = parseModels(R"({"models":[{"id":"mine","name":"我的","dir":"D:\\models\\mine",
+      "manifest":"a.model3.json","moc":"a.moc3","builtin":false,
+      "sha256":"aa59f7a3dc3b30b23b5f10afd9192ed755e4d01dc9a12442d99b972a418e2543"}]})");
+    CHECK(imported && imported->size() == 1 && !(*imported)[0].builtin);
+    CHECK(!parseModels(R"({"models":[{"id":"x","name":"x","dir":"C:\\a\\..\\b","manifest":"a","moc":"a",
+      "sha256":"aa59f7a3dc3b30b23b5f10afd9192ed755e4d01dc9a12442d99b972a418e2543"}]})"));
+    CHECK(!parseModels(R"({"models":[{"id":"x","name":"x","dir":"../evil","manifest":"a","moc":"a",
+      "sha256":"aa59f7a3dc3b30b23b5f10afd9192ed755e4d01dc9a12442d99b972a418e2543"}]})"));
+    CHECK(!parseModels(R"({"models":[{"id":"x","name":"x","dir":"a/b","manifest":"a","moc":"a",
+      "sha256":"short"}]})"));
+    CHECK(!parseModels(R"({"models":[{"id":"x","name":"x","dir":"a","manifest":"a","moc":"a",
+      "sha256":"aa59f7a3dc3b30b23b5f10afd9192ed755e4d01dc9a12442d99b972a418e2543"},
+      {"id":"x","name":"y","dir":"b","manifest":"b","moc":"b",
+      "sha256":"aa59f7a3dc3b30b23b5f10afd9192ed755e4d01dc9a12442d99b972a418e2543"}]})"));
   });
   std::printf("%d groups passed\n", tests);
 }

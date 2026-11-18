@@ -15,5 +15,7 @@ public:
   void show(Page);
   bool dialog(MSG &);
   void close();
+  // Called after a live rig swap so the workbench can show the measured latency.
+  void switched(const std::string &name, unsigned long long ms);
 };
 } // namespace pet

@@ -66,6 +66,19 @@ int main() {
     REQUIRE(f.find("recipe") == f.npos && f.find("int main") == f.npos && f.find("cpp") != f.npos);
   }
   REQUIRE(content(sent) == secret);
+  // Consented snacks: the shell moves the item to the bin under "<stamp>_<name>", stamped in local time.
+  {
+    Vault r(root);
+    std::wstring snack = root + L"\\snack.png";
+    REQUIRE(create(snack, "not really a png"));
+    auto stamped = r.recycle(snack);
+    if (!stamped.empty()) {
+      REQUIRE(stamped.find('_') != std::string::npos && stamped.find("snack.png") != std::string::npos);
+      REQUIRE(GetFileAttributesW(snack.c_str()) == INVALID_FILE_ATTRIBUTES);
+    }
+    REQUIRE(r.recycle(root + L"\\missing.png").empty());
+    REQUIRE(r.recycle(L"//server/share/snack.png").empty());
+  }
   {
     Vault v(root);
     Life a(v);

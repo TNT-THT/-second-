@@ -2,6 +2,8 @@
 #include <objidl.h>
 #include <gdiplus.h>
 #include <winreg.h>
+#include "layout.hpp"
+#include <algorithm>
 using namespace Gdiplus;
 namespace pet {
 View::View(HWND win, Vault &v) : hwnd(win), fx(v), files(v) {
@@ -36,6 +38,14 @@ View::~View() {
   if (gdip)
     GdiplusShutdown(gdip);
 }
+static bool lightTheme() {
+  DWORD light = 1, cb = sizeof light;
+  // Documented read-only preference; no write path exists in this app.
+  if (RegGetValueW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize",
+                   L"AppsUseLightTheme", RRF_RT_REG_DWORD, nullptr, &light, &cb) != ERROR_SUCCESS)
+    return true;
+  return light != 0;
+}
 void View::metrics() {
   UINT dpi = GetDpiForWindow(hwnd);
   if (!dpi)
@@ -47,6 +57,7 @@ void View::metrics() {
                    RRF_RT_REG_DWORD, nullptr, &scale, &cb) == ERROR_SUCCESS &&
       scale >= 100 && scale <= 225)
     textScale = scale / 100.;
+  darkTheme = !lightTheme();
   NONCLIENTMETRICSW n{sizeof(n)};
   SystemParametersInfoW(SPI_GETNONCLIENTMETRICS, sizeof n, &n, 0);
   font = std::max(16. * dpi / 96 * textScale, double(std::abs(n.lfMessageFont.lfHeight)));
@@ -86,6 +97,15 @@ static void text(Graphics &g, const std::wstring &s, RectF r, REAL px, Color c, 
   fmt.SetTrimming(StringTrimmingEllipsisCharacter);
   g.DrawString(s.c_str(), int(s.size()), &f, r, &fmt, &brush);
 }
+bool View::loadModel(Vault &v, const ModelEntry &entry) {
+  // Reuse the live render pipeline: no second decoder, no duplicate texture budget.
+  actor.actor.discard();
+  if (!actor.load(v, entry))
+    return false;
+  preloaded = true;
+  bubble = {0, 0, -1, -1};
+  return true;
+}
 void View::show(Scene &s, double mouth
 #ifdef PET_DEV
                 ,
@@ -97,7 +117,7 @@ void View::show(Scene &s, double mouth
   Pose p = s.pose();
   auto rt = GetTickCount64();
   if (!checked) {
-    s.trusted = actor.load(files);
+    s.trusted = preloaded || actor.load(files, haruModelEntry());
     checked = true;
     integrityAt = rt + 300000;
     s.capability = actor.actor.channels();
@@ -116,6 +136,7 @@ void View::show(Scene &s, double mouth
   }
   V waist = center();
   V paint = waist + V{(p.offset + p.rub) * s.scale, p.jump * s.scale};
+  POINT origin{LONG(std::lround(s.walk.pos.x - waist.x)), LONG(std::lround(s.walk.pos.y - waist.y))};
   memset(bits, 0, size_t(w) * h * 4);
   actor.paint(bits, w, h, paint, s.scale, p, mouth);
   Bitmap surface(w, h, w * 4, PixelFormat32bppPARGB, reinterpret_cast<BYTE *>(bits));
@@ -179,14 +200,55 @@ void View::show(Scene &s, double mouth
     bubble = {0, 0, -1, -1};
     if (!words.empty()) {
       REAL px = REAL(std::max(16. * GetDpiForWindow(hwnd) / 96, font * (s.mode == Mode::work ? .8 : 1.)));
-      REAL bw = REAL(std::min(double(w - 8), std::max(84., words.size() * double(px) + 26)));
-      int rows = std::max(1, int(std::ceil(words.size() * double(px) / (bw - 22))));
+      REAL bw = REAL(std::max(84., words.size() * double(px) + 26));
+      int rows = std::max(1, int(std::ceil(words.size() * double(px) / (double(bw) - 22))));
       REAL bh = REAL(rows * px * 1.5 + 10);
-      REAL y = std::max(2.f, cy - REAL((actor.present() ? 80 : 47) * s.scale) - bh - 12);
-      RectF rr(cx - bw * .5f, y, bw, bh);
+      // Placement is decided in virtual-screen coordinates against this monitor's work area, so a bubble
+      // never straddles an edge, and the arrow keeps pointing at the pet.
+      RECT area{};
+      MONITORINFO mi{sizeof(mi)};
+      if (GetMonitorInfoW(MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST), &mi))
+        area = mi.rcWork;
+      else
+        area = {0, 0, GetSystemMetrics(SM_CXVIRTUALSCREEN), GetSystemMetrics(SM_CYVIRTUALSCREEN)};
+      const int headY = int(std::lround(paint.y - (actor.present() ? 80. : 47.) * s.scale));
+      auto placed = placeBubble({area.left, area.top, area.right, area.bottom},
+                                origin.x + int(std::lround(paint.x)), origin.y + headY, int(bw), int(bh));
+      RectF rr(REAL(placed.box.l - origin.x), REAL(placed.box.t - origin.y), REAL(placed.box.width()),
+               REAL(placed.box.height()));
+      rr.X = std::clamp(rr.X, 0.f, std::max(0.f, REAL(w) - rr.Width));
+      rr.Y = std::clamp(rr.Y, 0.f, std::max(0.f, REAL(h) - rr.Height));
       rounded(g, rr, 12, Color(249, 255, 252, 251), Color(238, 199, 184, 211));
+      // Tail from the box toward the pet, clamped so it always touches the face.
+      REAL tailX = REAL(std::clamp(placed.tipX - origin.x, int(std::lround(rr.X + 14)),
+                                   int(std::lround(rr.GetRight() - 14))));
+      const REAL tailY = placed.below ? rr.Y : rr.GetBottom();
+      const REAL tipY = placed.below ? rr.Y - 7.f : rr.GetBottom() + 7.f;
+      PointF tail[] = {{tailX - 6.f, tailY}, {tailX + 6.f, tailY}, {tailX, tipY}};
+      SolidBrush tailFill(Color(249, 255, 252, 251));
+      g.FillPolygon(&tailFill, tail, 3);
       text(g, words, rr, px, Color(255, 62, 45, 72));
       bubble = {rr.X, rr.Y, rr.GetRight(), rr.GetBottom()};
+    }
+    if (dragActive) {
+      // Themed cue: accent ring for a valid payload, dim mask plus a forbidden mark otherwise.
+      Color accent = darkTheme ? Color(255, 122, 178, 255) : Color(255, 60, 120, 216);
+      Color danger = darkTheme ? Color(255, 255, 138, 138) : Color(255, 198, 74, 74);
+      REAL bx = REAL(paint.x), by = REAL(paint.y) - REAL(38 * s.scale);
+      REAL ex = REAL(52 * s.scale), ey = REAL(74 * s.scale);
+      if (dragValid) {
+        Pen ring(accent, 2.f);
+        Pen halo(Color(80, accent.GetR(), accent.GetG(), accent.GetB()), 5.f);
+        g.DrawEllipse(&halo, bx - ex, by - ey, 2 * ex, 2 * ey);
+        g.DrawEllipse(&ring, bx - ex, by - ey, 2 * ex, 2 * ey);
+      } else {
+        SolidBrush mask(Color(96, 24, 22, 32));
+        g.FillEllipse(&mask, bx - ex, by - ey, 2 * ex, 2 * ey);
+        Pen slash(danger, 3.f);
+        REAL r = 13 * REAL(s.scale);
+        g.DrawEllipse(&slash, bx - r, by - r, 2 * r, 2 * r);
+        g.DrawLine(&slash, bx - r * .7f, by + r * .7f, bx + r * .7f, by - r * .7f);
+      }
     }
     if (s.now < s.scaleLabel) {
       RectF rr(cx + rx + 5, cy - 13, 63, 26);
@@ -208,7 +270,7 @@ void View::show(Scene &s, double mouth
     }
 #endif
   }
-  POINT at{LONG(std::lround(s.walk.pos.x - waist.x)), LONG(std::lround(s.walk.pos.y - waist.y))}, src{0, 0};
+  POINT at = origin, src{0, 0};
   SIZE size{w, h};
   BLENDFUNCTION blend{AC_SRC_OVER, 0, 255, AC_SRC_ALPHA};
   UpdateLayeredWindow(hwnd, nullptr, &at, &size, dc, &src, 0, &blend, ULW_ALPHA);
