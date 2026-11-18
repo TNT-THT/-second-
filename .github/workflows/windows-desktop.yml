@@ -20,8 +20,8 @@ jobs:
           Gate {python tools/audit.py}; Gate {python tests/compat.py}; Gate {node --test tests/extension.cjs}
           Gate {cmake -S . -B build -A x64 -DPET_DEV=OFF}; Gate {cmake --build build --config Release --parallel 3}; Gate {ctest --test-dir build -C Release --output-on-failure}
           Gate {python -m pip install --quiet pillow}; Gate {python tests/render_haru.py build/Release/avatar_test.exe}
+          Write-Host ((Select-String -Path build/PetDesk.map -Pattern 'FindFirstFileExW|FindNextFileW' | ForEach-Object Line) -join "`n")
           Gate {python tools/package.py build/Release/PetDesk.exe}
-          if (Test-Path build/PetDesk.map) { Select-String -Path build/PetDesk.map -Pattern 'FindFirstFileExW|FindNextFileW' }
       - name: Probe extracted ZIP, native inputs, workbench, memory and CPU
         shell: powershell
         run: |
