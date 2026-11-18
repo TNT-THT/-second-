@@ -44,8 +44,8 @@ public static class DeskProbe {
   for(int attempt=0;attempt<3;attempt++){
    P p=waist(w);SetCursorPos(p.x,p.y);wait(120);click(8);wait(150);click(16);
    if(!until(()=>FindWindow("#32768",null)!=IntPtr.Zero,2500)){SendKeys.SendWait("{ESC}");wait(300);continue;}
-   SendKeys.SendWait("{DOWN}{ENTER}");IntPtr dialog=IntPtr.Zero;
-   if(!until(()=>(dialog=FindWindow("#32770",null))!=IntPtr.Zero,5000)){SendKeys.SendWait("{ESC}");wait(300);continue;}
+   SendKeys.SendWait("{HOME}{ENTER}");IntPtr dialog=IntPtr.Zero;
+   if(!until(()=>(dialog=FindWindow("#32770",null))!=IntPtr.Zero,8000)){SendKeys.SendWait("{ESC}");wait(300);continue;}
    SetForegroundWindow(dialog);wait(300);IntPtr field=IntPtr.Zero;
    if(!until(()=>(field=edit(dialog))!=IntPtr.Zero,2500)){PostMessage(dialog,0x10,IntPtr.Zero,IntPtr.Zero);wait(300);continue;}
    SendMessage(field,0x0c,IntPtr.Zero,file);wait(150);PostMessage(dialog,0x111,(IntPtr)1,IntPtr.Zero);
