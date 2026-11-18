@@ -4,6 +4,20 @@
 #include <array>
 #include <shlobj.h>
 #include <shobjidl.h>
+// Some SDK configurations hide the shell operation flags unless the full shell headers are pulled in.
+// These are the documented values, used only for a silent, undoable recycle.
+#ifndef FOF_SILENT
+#define FOF_SILENT 0x0004
+#endif
+#ifndef FOF_NOCONFIRMATION
+#define FOF_NOCONFIRMATION 0x0010
+#endif
+#ifndef FOF_ALLOWUNDO
+#define FOF_ALLOWUNDO 0x0040
+#endif
+#ifndef FOF_NOERRORUI
+#define FOF_NOERRORUI 0x0400
+#endif
 #include <wrl/client.h>
 #include <cstdio>
 using Microsoft::WRL::ComPtr;
@@ -410,7 +424,7 @@ std::wstring Vault::recycle(std::wstring_view path, std::string_view stamp) {
     ComPtr<IFileOperation> op;
     if (FAILED(CoCreateInstance(CLSID_FileOperation, nullptr, CLSCTX_ALL, IID_PPV_ARGS(op.GetAddressOf()))))
       return false;
-    if (FAILED(op->SetOperationFlags(FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_SILENT | FOF_NO_UI)))
+    if (FAILED(op->SetOperationFlags(FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_SILENT | FOF_NOERRORUI)))
       return false;
     ComPtr<IShellItem> item;
     if (FAILED(SHCreateItemFromParsingName(target.c_str(), nullptr, IID_PPV_ARGS(item.GetAddressOf()))))
