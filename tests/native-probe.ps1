@@ -1,4 +1,4 @@
-# Exercises an extracted copy of the actual Release ZIP. No hidden test channel in the app.
+﻿# Exercises an extracted copy of the actual Release ZIP. No hidden test channel in the app.
 $ErrorActionPreference='Stop'
 Add-Type -AssemblyName System.Windows.Forms,System.Drawing
 Add-Type -ReferencedAssemblies System.Windows.Forms,System.Drawing -TypeDefinition @'
@@ -45,20 +45,22 @@ public static class DeskProbe {
  static int ht(IntPtr w,P p){return (int)SendMessage(w,0x84,IntPtr.Zero,(IntPtr)((p.x&65535)|(p.y<<16)));}
  static void click(int flag){mouse_event((uint)flag,0,0,0,UIntPtr.Zero);}
  static int rows(string p){using(var f=new FileStream(p,FileMode.Open,FileAccess.Read,FileShare.ReadWrite))using(var r=new StreamReader(f)) {int n=0;while(r.ReadLine()!=null)n++;return n;}}
- static bool menuClick(IntPtr w,string prefix){
+ static bool menuClick(IntPtr w,string prefix,bool first=false){
   IntPtr menu=IntPtr.Zero;if(!until(()=>(menu=FindWindow("#32768",null))!=IntPtr.Zero,3000))return false;wait(200);
   IntPtr hm=(IntPtr)SendMessage(w,0x1e1,IntPtr.Zero,IntPtr.Zero);if(hm==IntPtr.Zero){SendKeys.SendWait("{ESC}");return false;}
   int n=GetMenuItemCount(hm);var label=new StringBuilder(256);R r;
   for(int i=0;i<n;i++){uint st=GetMenuState(hm,(uint)i,0x400);if(st==0xffffffff||(st&(1|2|0x800))!=0)continue;
    label.Length=0;GetMenuStringW(hm,(uint)i,label,256,0x400);
    if(label.ToString().StartsWith(prefix)&&GetMenuItemRect(w,hm,(uint)i,out r)){SetCursorPos((r.l+r.r)/2,(r.t+r.b)/2);wait(120);click(2);wait(120);click(4);return true;}}
+  if(first){for(int i=0;i<n;i++){uint st=GetMenuState(hm,(uint)i,0x400);if(st==0xffffffff||(st&(1|2|0x800))!=0)continue;
+   if(GetMenuItemRect(w,hm,(uint)i,out r)){SetCursorPos((r.l+r.r)/2,(r.t+r.b)/2);wait(120);click(2);wait(120);click(4);return true;}}}
   SendKeys.SendWait("{ESC}");return false;
  }
  static void picker(IntPtr w,string file){
   string why="";
   for(int attempt=0;attempt<3;attempt++){
    P p=waist(w);SetCursorPos(p.x,p.y);wait(140);click(8);wait(160);click(16);
-   bool clicked=menuClick(w,"投喂");why+="try"+attempt+":menu="+(FindWindow("#32768",null)!=IntPtr.Zero)+",clicked="+clicked+",fg="+cls(GetForegroundWindow())+";";
+   bool clicked=menuClick(w,"投喂",true);why+="try"+attempt+":menu="+(FindWindow("#32768",null)!=IntPtr.Zero)+",clicked="+clicked+",fg="+cls(GetForegroundWindow())+";";
    if(!clicked){wait(500);continue;}
    IntPtr dialog=IntPtr.Zero;if(!until(()=>(dialog=FindWindow("#32770",null))!=IntPtr.Zero,7000)){why+="nodlg,fg="+cls(GetForegroundWindow())+";";wait(600);continue;}
    SetForegroundWindow(dialog);wait(400);IntPtr field=IntPtr.Zero;
