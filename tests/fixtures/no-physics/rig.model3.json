@@ -1,0 +1,12 @@
+{
+  "Version": 3,
+  "FileReferences": {
+    "DisplayInfo": "rig.cdi3.json",
+    "Expressions": [
+      {
+        "Name": "smile",
+        "File": "smile.exp3.json"
+      }
+    ]
+  }
+}

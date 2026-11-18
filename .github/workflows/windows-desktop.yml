@@ -1,0 +1,69 @@
+name: Haru native desktop · release safety and interaction gates
+on:
+  push:
+    branches: [main, 'arena/**']
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - name: Build, verify original materials, exercise rules and render real Haru meshes
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'; $env:PYTHONUTF8='1'
+          function Gate([scriptblock]$step){$lines=& $step 2>&1; $rc=$LASTEXITCODE; $lines | ForEach-Object {Write-Host $_}; if($rc -ne 0){$tail=($lines | Select-Object -Last 24) -join ' | '; Write-Host "::error title=Haru gate::$tail";throw "exit $rc"}}
+          Gate {python tools/audit.py}; Gate {python tests/compat.py}; Gate {node --test tests/extension.cjs}
+          Gate {cmake -S . -B build -A x64 -DPET_DEV=OFF}; Gate {cmake --build build --config Release --parallel 3}; Gate {ctest --test-dir build -C Release --output-on-failure}
+          Gate {python -m pip install --quiet pillow}; Gate {python tests/render_generic.py build/Release/avatar_test.exe}
+          Gate {python tools/package.py build/Release/PetDesk.exe}
+      - name: Probe extracted ZIP, native inputs, workbench, memory and CPU
+        shell: powershell
+        run: |
+          try { & ./tests/native-probe.ps1 } catch { $msg=("$_ " + $_.ScriptStackTrace).Replace("`r",' ').Replace("`n",' '); Write-Host "::error title=Native probe::$msg"; throw }
+      - name: Keep a desktop screenshot if the probe failed
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: probe-desktop
+          path: |
+            ${{ runner.temp }}/**/fail.png
+            ${{ runner.temp }}/**/workbench.png
+          if-no-files-found: ignore
+          retention-days: 5
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Haru-tested-Windows
+          path: |
+            out/PetDesk-2.0.0-Haru-Preview*.zip
+            out/PetDesk-2.0.0-Haru-Preview*.sha256
+            out/Haru-workbench.png
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+  attach:
+    needs: windows
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v4
+        with:
+          name: Haru-tested-Windows
+          path: portable
+      - name: Publish these exact artifacts as a pre-release at the tested commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: petdesk-v2.0.0-haru-preview.2
+        run: |
+          set -eu
+          if gh release view "$TAG" >/dev/null 2>&1; then echo "$TAG already exists; leaving workflow artifacts."; exit 0; fi
+          gh release create "$TAG" --target "$GITHUB_SHA" --prerelease --title "PetDesk 2 · Haru 原生桌宠与工作台（本地测试版）" --notes-file docs/RELEASE-NOTES.md
+          gh release upload "$TAG" portable/*.zip portable/*.sha256 --clobber
+          if [ -f portable/Haru-workbench.png ]; then gh release upload "$TAG" portable/Haru-workbench.png --clobber; fi

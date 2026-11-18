@@ -1,0 +1,30 @@
+{
+  "manifest_version": 3,
+  "name": "桌边 · 洛谷小花",
+  "description": "仅在手动配对后，向本机桌宠发送前台洛谷在场信号与通过题号。",
+  "version": "0.1.0",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAplv6xDLxsPNxE9ocAymZ1P+RkKvMf6zjI7FVWGVxtn47ZVygWxyWiAo/p/XQuoFL3lfTN7vbxwZxMMuwIighHQkcE6Wxi/Ohn6vCENTsrylAxtgK3oXkZJFINJysnY1KMT/l/zQ5cFFuxNvV4PD/ybx3ycZ+mY45X5r9T8SiLkdyywxQkjIkoMxCOvbq8xPwcZrC8yayxK9l3N2daPpTmMwki/2I/ST84Yb/kMqMh6mFmPBU4JwJFV+Qld9Nx7qTPXb2NciEJCqVssmOcmzDBXfUcVnAqyHUhgdtoKLmGslZjJkraDbCvE8OEH501taXYAuMchUeuQM8uinBVDE8UQIDAQAB",
+  "permissions": [
+    "storage"
+  ],
+  "host_permissions": [
+    "http://127.0.0.1/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "https://www.luogu.com.cn/*"
+      ],
+      "js": [
+        "site.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "background": {
+    "service_worker": "worker.js"
+  },
+  "action": {
+    "default_popup": "pair.html"
+  }
+}

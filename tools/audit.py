@@ -1,0 +1,67 @@
+"""Release guard: inspect our runtime sources, the actual PE import table and embedded manifest.
+This is evidence about this executable, not a claim about the internal behavior of Windows DLLs.
+"""
+from pathlib import Path
+import argparse,base64,hashlib,json,re,struct
+root=Path(__file__).resolve().parents[1]
+DENY=re.compile(r'^(?:DeleteFile|RemoveDirectory|MoveFile(?:Ex|WithProgress|Transacted)?|ReplaceFile|CopyFile(?:Ex|2|Transacted)?|SetFileInformationByHandle|SetEndOfFile|SetFileValidData|SHFileOperation|EnumProcesses|K32EnumProcesses|CreateToolhelp32Snapshot|Process32(?:First|Next)|CreateRemoteThread(?:Ex)?|WriteProcessMemory|VirtualAllocEx|AdjustTokenPrivileges|RegSetValue(?:Ex)?|RegCreateKey(?:Ex)?|RegDelete(?:Key|Value|Tree)(?:Ex)?|SetWindowsHookEx|OpenClipboard|GetClipboardData|AddClipboardFormatListener|SetClipboardViewer|ShellExecute(?:Ex)?|CreateProcess|EncryptFile|DecryptFile|SetFileAttributes|SetSecurityInfo|NtSetInformationFile|(?:_w?|_)?(?:unlink|rmdir|remove|rename))(?:(?:A|W))?$',re.I)
+WINSOCK_ORDINALS={1:'accept',2:'bind',3:'closesocket',4:'connect',5:'getpeername',6:'getsockname',7:'getsockopt',8:'htonl',9:'htons',10:'ioctlsocket',11:'inet_addr',12:'inet_ntoa',13:'listen',14:'ntohl',15:'ntohs',16:'recv',17:'recvfrom',18:'select',19:'send',20:'sendto',21:'setsockopt',22:'shutdown',23:'socket',51:'gethostbyaddr',52:'gethostbyname',53:'getprotobyname',54:'getprotobynumber',55:'getservbyname',56:'getservbyport',101:'WSAAsyncSelect',102:'WSAAsyncGetHostByAddr',103:'WSAAsyncGetHostByName',104:'WSAAsyncGetProtoByNumber',105:'WSAAsyncGetProtoByName',106:'WSAAsyncGetServByPort',107:'WSAAsyncGetServByName',108:'WSACancelAsyncRequest',109:'WSASetBlockingHook',110:'WSAUnhookBlockingHook',111:'WSAGetLastError',112:'WSASetLastError',113:'WSACancelBlockingCall',114:'WSAIsBlocking',115:'WSAStartup',116:'WSACleanup',151:'__WSAFDIsSet'}
+PRIV=('SeDebugPrivilege','SeBackupPrivilege','SE_DEBUG_PRIVILEGE','SE_BACKUP_PRIVILEGE')
+def require(v,msg):
+    if not v:raise SystemExit('AUDIT FAILED: '+msg)
+def source():
+    files=[p for d in ('engine','native') for p in (root/d).glob('*') if p.suffix in ('.hpp','.cpp','.h')]
+    for p in files:
+        t=p.read_text();calls=re.findall(r'\b([a-zA-Z_]\w*)\s*\(',t)
+        # Standard algorithms erase elements in RAM; this is not the C file-removal function.
+        require(not any(DENY.fullmatch(c) for c in calls),f'denied call in {p.name}: {[c for c in calls if DENY.fullmatch(c)]}')
+        for word in (*PRIV,'CREATE_ALWAYS','TRUNCATE_EXISTING','GENERIC_WRITE','FILE_WRITE_DATA','FILE_FLAG_DELETE_ON_CLOSE','GetProcAddress(','LoadLibrary','std::filesystem','std::ofstream','system(','popen(','fopen(','fread(','std::ifstream','std::fstream','FILE_LIST_DIRECTORY','FindFirstFile','FindNextFile'):
+            require(word not in t, f'{word} in {p.name}')
+        if p.name!='vault.cpp':
+            for word in ('CreateFileW(','ReadFile(','WriteFile(','FlushFileBuffers(','GetFileAttributesExW('):require(word not in t, f'unconfined {word} in {p.name}')
+    vault=(root/'native/vault.cpp').read_text();require(len(re.findall(r'\bWriteFile\s*\(',vault))==1,'not exactly one append sink')
+    food=vault.split('inspectFood(',1)[1].split('static std::wstring finalName',1)[0]
+    require(not re.search(r'\b(?:CreateFile|ReadFile|SHCreateStream|fopen|ifstream|bytes|readOnly|asset)\w*\s*\(',food),'food path opens content')
+    require('PROCESS_QUERY_LIMITED_INFORMATION' in (root/'native/main.cpp').read_text(),'foreground process rights not bounded')
+    for rel,digest in json.loads((root/'tools/haru-lock.json').read_text()).items():
+        p=root/'assets/models/haru'/rel;require(p.is_file() and hashlib.sha256(p.read_bytes()).hexdigest()==digest,'changed/missing Haru original '+rel)
+    require('Haru.' not in (root/'engine/avatar.cpp').read_text(),'model-specific file name leaked into the generic avatar engine')
+    require('pin = haruSha' in (root/'engine/avatar.hpp').read_text(),'release no longer defaults to the pinned upstream MOC')
+    require("'tests'" not in (root/'tools/package.py').read_text(),'test models must never be packaged')
+    require((root/'tests/models/hiyori/LICENSE.md').is_file(),'second test model lost its upstream notice')
+    require((root/'vendor/purism/core.c').is_file() and not (root/'vendor/purism/core.cpp').exists(),'vendored core must build as C for MSVC')
+    require('FILE_APPEND_DATA' in vault and 'OPEN_ALWAYS' in vault and 'nNumberOfLinks' in vault and 'FILE_FLAG_OPEN_REPARSE_POINT' in vault,'missing confinement guards')
+    cfg=json.loads((root/'config/settings.json').read_text());require(cfg=={'luogu':False,'input_counts':False,'birthday':''},'not opt-out by default')
+    manifest=json.loads((root/'extension/manifest.json').read_text());origin='chrome-extension://'+''.join(chr(97+int(x,16)) for x in hashlib.sha256(base64.b64decode(manifest['key'])).hexdigest()[:32]);require(origin in (root/'native/extension_origin.hpp').read_text(),'wrong paired extension origin');require(manifest['permissions']==['storage'] and manifest['content_scripts'][0]['matches']==['https://www.luogu.com.cn/*'] and manifest['host_permissions']==['http://127.0.0.1/*'],'extension permission drift')
+    require(len(set((root/'assets/chat.txt').read_text().splitlines()))>=50,'insufficient local lines');print(f'Runtime source guard: {len(files)} files; one append sink; private metadata path and opt-ins checked.')
+def binary(path):
+    data=Path(path).read_bytes();u16=lambda a:struct.unpack_from('<H',data,a)[0];u32=lambda a:struct.unpack_from('<I',data,a)[0];u64=lambda a:struct.unpack_from('<Q',data,a)[0];pe=u32(0x3c);require(data[pe:pe+4]==b'PE\0\0' and u16(pe+4)==0x8664,'not x64 PE');o=pe+24;require(u16(o)==0x20b,'not PE32+');rvas=o+112;sections=[]
+    for i in range(u16(pe+6)):
+        s=o+u16(pe+20)+i*40;vs,va,raw,off=struct.unpack_from('<4I',data,s+8);sections.append((va,max(vs,raw),off))
+    def offset(rva):
+        for va,size,off in sections:
+            if va<=rva<va+size:return off+rva-va
+        raise ValueError(f'bad RVA {rva:x}')
+    def string(rva):
+        a=offset(rva);return data[a:data.index(b'\0',a)].decode('ascii')
+    at=offset(u32(rvas+8));imports=[];libs=[]
+    while any(data[at:at+20]):
+        orig,_,_,name,iat=struct.unpack_from('<5I',data,at);dll=string(name).lower();libs.append(dll);a=offset(orig or iat)
+        while (entry:=u64(a)):
+            # Winsock's legacy import library binds socket calls (accept..inet_addr) and the ordinal-only
+            # __WSAFDIsSet (used by FD_ISSET in our loopback listener) by ordinal. Nothing else may be.
+            if entry>>63:
+                require(dll=='ws2_32.dll' and (entry&0xffff) in WINSOCK_ORDINALS,f'unresolved ordinal import from {dll}: entry={entry:#018x}')
+                imports.append('<ws2_32 #%d %s>'%(entry&0xffff,WINSOCK_ORDINALS[entry&0xffff]))
+            else:imports.append(string(entry+2));a+=8;continue
+            a+=8
+        at+=20
+    require(u32(rvas+13*8)==0,'unexpected delay imports');require(not any(DENY.fullmatch(x) for x in imports),'denied import: '+', '.join(x for x in imports if DENY.fullmatch(x))+' | all: '+', '.join(imports))
+    for x in imports:
+        if x in ('FindFirstFileExW','FindNextFileW'):print('note: CRT provides an unreferenced read-only enumeration thunk:',x)
+    require(not any(x.startswith(('vcruntime','msvcp','libstdc++')) for x in libs),'unexpected runtime dependency');require(b'level="asInvoker"' in data or b"level='asInvoker'" in data,'no embedded asInvoker manifest');require(b'requireAdministrator' not in data,'elevated manifest');
+    for word in PRIV:require(word.encode() not in data and word.encode('utf-16le') not in data,'privilege marker')
+    require('GetProcessMemoryInfo' not in imports and 'K32GetProcessMemoryInfo' not in imports,'developer HUD in release');print('PE x64, embedded asInvoker, no extra privileges; checked',len(imports),'named imports in',', '.join(libs));print('EXE SHA-256:',hashlib.sha256(data).hexdigest())
+if __name__=='__main__':
+    p=argparse.ArgumentParser();p.add_argument('--pe');opt=p.parse_args();source();
+    if opt.pe:binary(opt.pe)

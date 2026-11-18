@@ -1,0 +1,3 @@
+Sakura Motion Project / Purism Core, MIT. Commit 1069334965522df5d0b791e97f01e26b19c45456.
+https://github.com/SakuraMotion/PurismCore/tree/1069334965522df5d0b791e97f01e26b19c45456
+PurismCoreBundle.h is the output of scripts/bundle.sh at that revision. Project note: the header is upstream-generated but we compile it through our own `core.c` in C mode (MSVC rejects two C99 compound literals in C++ mode); the header itself is untouched. It is not Live2D's proprietary Core. No sample viewer, compatibility DLL or test assets shipped from this dependency.
