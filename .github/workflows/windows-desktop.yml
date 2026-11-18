@@ -47,23 +47,23 @@ jobs:
           retention-days: 14
   attach:
     needs: windows
-    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v5
       - uses: actions/download-artifact@v4
         with:
           name: Haru-tested-Windows
           path: portable
-      - name: Attach to the existing draft and repoint it at this tested revision
+      - name: Publish these exact artifacts as a pre-release at the tested commit
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: petdesk-v2.0.0-haru-preview.1
         run: |
           set -eu
-          id=$(gh api "repos/$GITHUB_REPOSITORY/releases" --jq '.[] | select(.tag_name=="petdesk-v2.0.0-haru-preview.1" and .draft==true) | .id')
-          if [ -z "$id" ]; then echo 'No matching draft; leaving workflow artifacts.'; exit 0; fi
-          # The assets below were produced from $GITHUB_SHA, so the draft must describe that revision.
-          gh api -X PATCH "repos/$GITHUB_REPOSITORY/releases/$id" -f target_commitish="$GITHUB_SHA" --jq '.target_commitish'
-          gh release upload "$TAG" portable/*.zip portable/*.sha256 portable/Haru-workbench.png --repo "$GITHUB_REPOSITORY"
+          if gh release view "$TAG" >/dev/null 2>&1; then echo "$TAG already exists; leaving workflow artifacts."; exit 0; fi
+          gh release create "$TAG" --target "$GITHUB_SHA" --prerelease --title "PetDesk 2 · Haru 原生桌宠与工作台（本地测试版）" --notes-file docs/RELEASE-NOTES.md
+          gh release upload "$TAG" portable/*.zip portable/*.sha256 --clobber
+          if [ -f portable/Haru-workbench.png ]; then gh release upload "$TAG" portable/Haru-workbench.png --clobber; fi
