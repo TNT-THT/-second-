@@ -10,8 +10,8 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 18
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: '22'
           cache: npm
@@ -20,13 +20,17 @@ jobs:
       - name: Build standalone Windows folder and lightweight starter
         run: ./scripts/windows-portable.ps1
       - name: Check the real transparent window, isolated IPC and model switching
-        run: npm run smoke:desktop
+        run: |
+          $env:PETDESK_BINARY=(Resolve-Path 'out/PetDesk-*-Windows-x64/PetDesk.exe').Path
+          npm run smoke:desktop
       - uses: actions/upload-artifact@v4
         with:
           name: PetDesk-Windows-x64
           path: |
             out/*-Windows-x64.zip
             out/*-Windows-x64.zip.sha256
+            out/*-Starter.zip
+            out/*-Starter.zip.sha256
           if-no-files-found: error
           compression-level: 0
           retention-days: 14
@@ -46,8 +50,7 @@ jobs:
           TAG: petdesk-v1.0.0
         run: |
           set -eu
-          if ! sha=$(gh api "repos/$GITHUB_REPOSITORY/commits/$TAG" --jq '.sha' 2>/dev/null); then
-            echo 'No matching release tag; the ZIP is available as a workflow artifact.'; exit 0
-          fi
-          if [ "$sha" != "$GITHUB_SHA" ]; then echo 'Different revision; not modifying the release.'; exit 0; fi
+          # Upload to the explicitly prepared, unpublished test release; never retag or overwrite.
+          target=$(gh api "repos/$GITHUB_REPOSITORY/releases" --jq '.[] | select(.tag_name=="petdesk-v1.0.0" and .draft==true) | .target_commitish')
+          if [ "$target" != "$GITHUB_SHA" ]; then echo 'No draft for this revision; ZIPs remain workflow artifacts.'; exit 0; fi
           gh release upload "$TAG" portable/*.zip portable/*.sha256 --repo "$GITHUB_REPOSITORY"

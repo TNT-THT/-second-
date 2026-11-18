@@ -1,87 +1,102 @@
-// Run on a graphical desktop or a Windows runner. Uses isolated preferences; does not feed files.
-import { _electron as electron } from 'playwright-core';
-import { mkdtemp, rm } from 'node:fs/promises';
+// Exercise a disposable copy of the real app instead of enabling a Node inspector in the product.
+// A Windows runner can point PETDESK_BINARY at the already-packaged exe. Its ZIP is never modified.
+import fs from 'node:fs/promises';
+import { spawn } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
-import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
+import { createRequire } from 'node:module';
 const root = fileURLToPath(new URL('../', import.meta.url)),
-  profile = await mkdtemp(path.join(os.tmpdir(), 'petdesk-smoke-'));
-let app;
+  tmp = await fs.mkdtemp(
+    path.join(process.env.RUNNER_TEMP || os.tmpdir(), 'petdesk-smoke-'),
+  );
+let child,
+  timeout,
+  stderr = '';
+const resultFile = path.join(tmp, 'result.json'),
+  trace = path.join(tmp, 'trace.log');
 try {
-  app = await electron.launch({
-    args: [`--user-data-dir=${profile}`, root],
-    timeout: 60000,
+  let exe,
+    appDir,
+    args = [];
+  if (process.env.PETDESK_BINARY) {
+    const original = path.resolve(process.env.PETDESK_BINARY),
+      copy = path.join(tmp, 'runtime');
+    await fs.cp(path.dirname(original), copy, { recursive: true });
+    exe = path.join(copy, path.basename(original));
+    appDir = path.join(copy, 'resources', 'app');
+  } else {
+    exe = createRequire(import.meta.url)('electron');
+    appDir = path.join(tmp, 'app');
+    await fs.mkdir(appDir);
+    for (const d of ['core', 'desktop', 'dist'])
+      await fs.cp(path.join(root, d), path.join(appDir, d), {
+        recursive: true,
+      });
+    await fs.copyFile(
+      path.join(root, 'package.json'),
+      path.join(appDir, 'package.json'),
+    );
+    args.push(appDir);
+  }
+  await fs.copyFile(
+    new URL('./native-probe.mjs', import.meta.url),
+    path.join(appDir, 'desktop/native-probe.mjs'),
+  );
+  const main = path.join(appDir, 'desktop/main.mjs');
+  await fs.writeFile(
+    main,
+    "import './native-probe.mjs';\n" + (await fs.readFile(main, 'utf8')),
+  );
+  child = spawn(
+    exe,
+    [
+      `--user-data-dir=${path.join(tmp, 'profile')}`,
+      '--enable-logging=stderr',
+      ...args,
+    ],
+    {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: { ...process.env, PETDESK_SMOKE_DIR: tmp },
+    },
+  );
+  for (const p of [child.stdout, child.stderr])
+    p.on('data', (d) => {
+      stderr = (stderr + d).slice(-5000);
+    });
+  const code = await new Promise((res, rej) => {
+    child.on('error', rej);
+    child.on('exit', res);
+    timeout = setTimeout(() => {
+      child.kill();
+      rej(Error('Desktop smoke timed out'));
+    }, 80000);
   });
-  const pet = await app.firstWindow({ timeout: 40000 });
-  const errors = [];
-  pet.on('pageerror', (e) => errors.push(e.message));
-  await pet.locator('.native .pet-art img').waitFor();
-  await pet.waitForFunction(
-    () => document.querySelector('.pet-art img')?.naturalWidth > 0,
-  );
-  assert.equal(pet.url(), 'petdesk://app/index.html#pet');
-  assert.equal(
-    await pet.evaluate(() => getComputedStyle(document.body).backgroundColor),
-    'rgba(0, 0, 0, 0)',
-  );
-  const native = await app.evaluate(({ BrowserWindow }) => {
-    const all = BrowserWindow.getAllWindows(),
-      w = all[0];
-    return {
-      count: all.length,
-      top: w.isAlwaysOnTop(),
-      focusable: w.isFocusable(),
-      visible: w.isVisible(),
-    };
-  });
-  assert.equal(native.count, 1);
-  assert.equal(native.top, true);
-  assert.equal(native.focusable, false);
-  await pet.evaluate(() =>
-    window.petdesk.act({ type: 'pref', key: 'roam', value: false }),
-  );
-  await pet.evaluate(() => window.petdesk.act({ type: 'pat' }));
-  assert.equal(
-    await pet.evaluate(
-      async () => (await window.petdesk.snapshot()).state.stats.bond,
-    ),
-    34,
-  );
-  const next = app.waitForEvent('window');
-  await pet.evaluate(() => window.petdesk.studio());
-  const studio = await next;
-  studio.on('pageerror', (e) => errors.push(e.message));
-  await studio.locator('h1').waitFor();
-  await studio.getByRole('switch', { name: '免打扰模式', exact: true }).click();
-  await pet.waitForFunction(
-    async () =>
-      (await window.petdesk.snapshot()).state.prefs.passThrough === true,
-  );
-  await studio.getByRole('button', { name: '模型库', exact: true }).click();
-  await studio
-    .locator('input[aria-label="选择模型文件"]')
-    .setInputFiles(path.join(root, 'public/art/qwen.webp'));
-  await pet.waitForFunction(() =>
-    document.querySelector('.pet-art img')?.src.startsWith('blob:'),
-  );
-  await studio.getByRole('button', { name: '回到桌面', exact: true }).click();
-  const visible = await app.evaluate(({ BrowserWindow }) =>
-    BrowserWindow.getAllWindows()
-      .filter((w) => w.isVisible())
-      .map((w) => w.webContents.getURL()),
-  );
-  assert.deepEqual(visible, ['petdesk://app/index.html#pet']);
-  assert.deepEqual(errors, []);
-  console.log(
-    'PASS native: pet-only launch, transparent always-on-top nonfocusable window, real two-window IPC, DND, local model sync, only pet visible on return.',
-  );
+  const result = JSON.parse(await fs.readFile(resultFile, 'utf8'));
+  if (!result.ok || code !== 0) throw Error(result.message || `Exit: ${code}`);
+  console.log(await fs.readFile(trace, 'utf8'));
+} catch (e) {
+  const detail = await fs
+    .readFile(trace, 'utf8')
+    .catch(() => '(probe did not start)');
+  const msg = `${e.message}\n${detail}\n${stderr}`;
+  if (process.env.GITHUB_ACTIONS)
+    console.error(
+      '::error title=Desktop smoke::' +
+        msg
+          .slice(-7000)
+          .replaceAll('%', '%25')
+          .replaceAll('\r', '%0D')
+          .replaceAll('\n', '%0A'),
+    );
+  throw Error(msg);
 } finally {
-  await app?.close();
-  await rm(profile, {
-    force: true,
+  clearTimeout(timeout);
+  if (child?.exitCode === null) child.kill();
+  await fs.rm(tmp, {
     recursive: true,
-    maxRetries: 4,
-    retryDelay: 200,
+    force: true,
+    maxRetries: 6,
+    retryDelay: 300,
   });
 }

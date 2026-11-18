@@ -27,7 +27,6 @@
   "devDependencies": {
     "electron": "45.3.4",
     "fflate": "0.8.2",
-    "playwright-core": "1.62.1",
     "vite": "7.3.8"
   }
 }
