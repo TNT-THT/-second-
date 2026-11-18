@@ -220,8 +220,9 @@ void View::show(Scene &s, double mouth
       rr.Y = std::clamp(rr.Y, 0.f, std::max(0.f, REAL(h) - rr.Height));
       rounded(g, rr, 12, Color(249, 255, 252, 251), Color(238, 199, 184, 211));
       // Tail from the box toward the pet, clamped so it always touches the face.
-      REAL tailX = REAL(std::clamp(placed.tipX - origin.x, int(std::lround(rr.X + 14)),
-                                   int(std::lround(rr.GetRight() - 14))));
+      const int tailLo = int(std::lround(rr.X)) + 14, tailHi = int(std::lround(rr.GetRight())) - 14;
+      const int tailAt = std::clamp(int(placed.tipX - origin.x), tailLo, std::max(tailLo, tailHi));
+      const REAL tailX = REAL(tailAt);
       const REAL tailY = placed.below ? rr.Y : rr.GetBottom();
       const REAL tipY = placed.below ? rr.Y - 7.f : rr.GetBottom() + 7.f;
       PointF tail[] = {{tailX - 6.f, tailY}, {tailX + 6.f, tailY}, {tailX, tipY}};
