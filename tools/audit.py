@@ -43,7 +43,9 @@ def binary(path):
     while any(data[at:at+20]):
         orig,_,_,name,iat=struct.unpack_from('<5I',data,at);dll=string(name).lower();libs.append(dll);a=offset(orig or iat)
         while (entry:=u64(a)):
-            require(not(entry>>63),'unresolved ordinal import from '+dll);imports.append(string(entry+2));a+=8
+            # ws2_32 exports __WSAFDIsSet (used by FD_ISSET in our loopback listener) by ordinal 151 only.
+            require(not(entry>>63) or (dll=='ws2_32.dll' and (entry&0xffff)==151),'unresolved ordinal import from '+dll)
+            imports.append('<__WSAFDIsSet>' if entry>>63 else string(entry+2));a+=8
         at+=20
     require(u32(rvas+13*8)==0,'unexpected delay imports');require(not any(DENY.fullmatch(x) for x in imports),'denied import: '+', '.join(x for x in imports if DENY.fullmatch(x)))
     require(not any(x.startswith(('vcruntime','msvcp','libstdc++')) for x in libs),'unexpected runtime dependency');require(b'level="asInvoker"' in data or b"level='asInvoker'" in data,'no embedded asInvoker manifest');require(b'requireAdministrator' not in data,'elevated manifest');
