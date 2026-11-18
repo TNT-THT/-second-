@@ -18,7 +18,15 @@ jobs:
       - run: npm ci
       - run: npm test
       - name: Build standalone Windows folder and lightweight starter
-        run: ./scripts/windows-portable.ps1
+        run: |
+          $log=Join-Path $env:RUNNER_TEMP 'petdesk-build.txt'
+          try { & ./scripts/windows-portable.ps1 *>&1 | Tee-Object -FilePath $log }
+          catch {
+            $tail=(Get-Content -LiteralPath $log -Tail 32) -join "`n"
+            $message=("$tail`n$_").Replace('%','%25').Replace("`r",'%0D').Replace("`n",'%0A')
+            Write-Host "::error title=Windows bundle::$message"
+            throw
+          }
       - name: Verify CRCs, SHA-256 pairs and chibi portraits and window helper
         run: python scripts/verify-bundle.py --windows
       - name: Exercise OS hit target, real window ledges, gravity, flight, skins and meals
