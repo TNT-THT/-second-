@@ -112,6 +112,11 @@ void Scene::food(FoodResult r, bool real) {
     talk(L"今天吃够啦");
     return;
   }
+  if (r == FoodResult::heavy) {
+    action(Clip::shake, 900);
+    talk(heavyLine);
+    return;
+  }
   action(Clip::eat, 3500);
   auto d = civil(wall);
   talk(!real                       ? L"来尝尝记忆里的味道～"

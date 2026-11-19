@@ -15,6 +15,8 @@ struct ModelResources {
   std::string mapping;
   // Release keeps the upstream pins; only an isolated test binary supplies another official model.
   std::string manifest = "Haru.model3.json", pin = haruSha;
+  // Part name whose children get wet-hem shading; empty means this rig has no such part.
+  std::string clothPart = "Part01Body001";
 };
 class Avatar {
   struct Impl;

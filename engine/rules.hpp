@@ -60,7 +60,7 @@ struct Options {
 };
 std::string encode(const Options &);
 std::optional<Options> decodeOptions(std::string_view);
-enum class FoodResult { fresh, again, full, no, io };
+enum class FoodResult { fresh, again, full, no, io, heavy };
 // Platform implements only these two append capabilities. Offsets are durable feed-log byte ends.
 struct Journal {
   virtual std::optional<uint64_t> meal(const Meal &) = 0;

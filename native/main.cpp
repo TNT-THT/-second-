@@ -1,4 +1,7 @@
 #include "bridge.hpp"
+#include "drop.hpp"
+#include "feed.hpp"
+#include "json.hpp"
 #include "environment.hpp"
 #include "workbench.hpp"
 #include "memo.hpp"
@@ -9,6 +12,8 @@
 #include <wtsapi32.h>
 #include <dwmapi.h>
 #include <ctime>
+#include <cwctype>
+#include <algorithm>
 #ifdef PET_DEV
 #include <psapi.h>
 #endif
@@ -54,6 +59,32 @@ static std::wstring pick(HWND win) {
   d->Release();
   return p;
 }
+static std::wstring pickModel(HWND win) {
+  IFileOpenDialog *d = nullptr;
+  if (FAILED(CoCreateInstance(CLSID_FileOpenDialog, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&d))))
+    return {};
+  DWORD f = 0;
+  d->GetOptions(&f);
+  d->SetOptions(f | FOS_FORCEFILESYSTEM | FOS_FILEMUSTEXIST | FOS_PATHMUSTEXIST | FOS_STRICTFILETYPES |
+                FOS_NOCHANGEDIR | FOS_DONTADDTORECENT | FOS_NODEREFERENCELINKS);
+  COMDLG_FILTERSPEC filter[] = {{L"Live2D 模型描述", L"*.model3.json"}};
+  d->SetFileTypes(1, filter);
+  d->SetTitle(L"导入模型 · 只读取所选目录里的描述与资源");
+  std::wstring p;
+  if (SUCCEEDED(d->Show(win))) {
+    IShellItem *i = nullptr;
+    if (SUCCEEDED(d->GetResult(&i))) {
+      PWSTR path = nullptr;
+      if (SUCCEEDED(i->GetDisplayName(SIGDN_FILESYSPATH, &path))) {
+        p = path;
+        CoTaskMemFree(path);
+      }
+      i->Release();
+    }
+  }
+  d->Release();
+  return p;
+}
 struct App {
   HWND hwnd = nullptr;
   Vault files{Vault::exeDir()};
@@ -65,6 +96,12 @@ struct App {
   Environment env{files};
   Memo memo{files};
   std::unique_ptr<Workbench> bench;
+  std::vector<ModelEntry> models;
+  std::string modelId = "haru";
+  FeedLimits limits;
+  bool recycleConsent = false, askedRecycle = false;
+  IDropTarget *dropTarget = nullptr;
+  std::wstring quickNotice;
   bool voiceHot = false, voiceHold = false;
   ms voiceAt = 0;
   void pure() {
@@ -257,7 +294,29 @@ struct App {
     foreground(true);
     s.init(world, t);
     view = std::make_unique<View>(hwnd, files);
-    DragAcceptFiles(hwnd, TRUE);
+    loadLimits();
+    loadModels();
+    installDrop();
+    if (!modelId.empty())
+      switchModel(modelId, false);
+    wchar_t diag[8]{};
+    bool diagOn = GetEnvironmentVariableW(L"PETDESK_DIAG", diag, 8) != 0;
+    if (diagOn) {
+      // Read-only rehearsal of the same path the loader takes, so a failing probe names the exact step.
+      auto probeMoc = files.modelAsset("Haru.moc3", 8 * 1024 * 1024);
+      auto probeMan = files.modelAsset("Haru.model3.json", 256 * 1024);
+      std::string line = std::string("{\"kind\":\"probe\",\"models\":") + std::to_string(models.size()) +
+                         ",\"dir\":\"" + utf8(files.modelDir()) + "\",\"manifest\":" +
+                         std::to_string(probeMan.size()) + ",\"moc\":" + std::to_string(probeMoc.size()) +
+                         ",\"sha\":\"" +
+                         (probeMoc.empty() ? "" : sha256({(char *)probeMoc.data(), probeMoc.size()}).substr(0, 10)) +
+                         "\",\"pin\":\"" + (models.empty() ? "" : models.front().sha.substr(0, 10)) + "\"}";
+      files.note(Note::models, line);
+      if (view)
+        files.note(Note::models, std::string("{\"kind\":\"diag\",\"actor\":") +
+                                     (view->hasActor() ? "true" : "false") + ",\"trusted\":" +
+                                     (s.trusted ? "true" : "false") + "}");
+    }
     WTSRegisterSessionNotification(hwnd, NOTIFY_FOR_THIS_SESSION);
     power = RegisterPowerSettingNotification(hwnd, &GUID_CONSOLE_DISPLAY_STATE, DEVICE_NOTIFY_WINDOW_HANDLE);
     bool keys = RegisterHotKey(hwnd, 1, MOD_CONTROL | MOD_SHIFT | MOD_NOREPEAT, 'M') != 0;
@@ -405,41 +464,322 @@ struct App {
     frame();
     reschedule(s.drag || right || s.activeVisual() ? 33 : life.s.satiety == 0 ? 180 : 80);
   }
+  static std::string entryLine(const ModelEntry &e) {
+    nlohmann::json j;
+    j["kind"] = "entry";
+    j["id"] = e.id;
+    j["name"] = e.name;
+    j["dir"] = e.dir;
+    j["manifest"] = e.manifest;
+    j["moc"] = e.moc;
+    j["sha256"] = e.sha;
+    j["builtin"] = e.builtin;
+    nlohmann::json a;
+    a["cloth_part"] = e.adapter.clothPart;
+    a["expressions"] = nlohmann::json::object();
+    for (auto &[k, v] : e.adapter.expressions)
+      a["expressions"][k] = v;
+    if (!e.adapter.tracks.empty())
+      a["tracks"] = e.adapter.tracks;
+    j["adapter"] = a;
+    return j.dump();
+  }
+  void loadModels() {
+    models.clear();
+    auto reg = parseModels(files.setting(L"builtin_models.json", 128 * 1024));
+    if (reg)
+      models = *reg;
+    else if (!files.setting(L"builtin_models.json", 128 * 1024).empty())
+      life.dream = true;
+    for (auto &line : files.notes(Note::models, 64)) {
+      nlohmann::json j = nlohmann::json::parse(line, nullptr, false);
+      if (j.is_discarded() || !j.is_object())
+        continue;
+      auto kind = j.value("kind", std::string());
+      if (kind == "entry") {
+        auto one = parseModels("{\"models\":[" + line + "]}");
+        if (one && one->size() == 1) {
+          auto exists = std::any_of(models.begin(), models.end(),
+                                    [&](const ModelEntry &m) { return m.id == one->front().id; });
+          if (!exists)
+            models.push_back(one->front());
+        }
+      } else if (kind == "active") {
+        modelId = j.value("id", modelId);
+      } else if (kind == "consent") {
+        recycleConsent = j.value("recycle", false);
+        askedRecycle = true;
+      }
+    }
+    if (models.empty()) {
+      life.dream = true;
+      modelId.clear();
+    }
+  }
+  void loadLimits() {
+    auto raw = files.feedLimits();
+    auto parsed = parseFeedLimits(raw);
+    if (!raw.empty() && !parsed)
+      life.dream = true; // edited but unreadable: fall back to the documented default and stay quiet
+    limits = parsed.value_or(FeedLimits{});
+    s.heavyLine = wide(limits.heavyLine);
+  }
+  bool switchModel(const std::string &id, bool persist = true) {
+    if (!view)
+      return false;
+    const ModelEntry *entry = nullptr;
+    for (auto &m : models)
+      if (m.id == id)
+        entry = &m;
+    if (!entry)
+      return false;
+    auto started = GetTickCount64();
+    if (!view->loadModel(files, *entry)) {
+      ModelEntry fallback = haruModelEntry();
+      for (auto &m : models)
+        if (m.id == "haru")
+          fallback = m;
+      view->loadModel(files, fallback);
+      s.trusted = view->hasActor();
+      s.smartStop();
+      s.talk(L"这个模型好像缺了点什么…", 4000);
+      return false;
+    }
+    modelId = id;
+    s.trusted = view->hasActor();
+    s.capability = 0; // measured again from the new rig on the next frame
+    s.cancel();       // no clip or intent survives the swap
+    s.intents.recognize = s.trusted && s.opt.intent;
+    s.intents.compose = s.trusted && s.opt.feedback;
+    if (persist)
+      files.note(Note::models, "{\"kind\":\"active\",\"id\":\"" + id + "\"}");
+    if (bench) {
+      auto took = GetTickCount64() - started;
+      bench->switched(entry->name, took);
+    }
+    prev = GetTickCount64();
+    frame();
+    return true;
+  }
+  void importModel(const std::wstring &path) {
+    auto at = path.find_last_of(L'\\');
+    if (at == std::wstring::npos) {
+      quickNotice = L"这个位置读不了呢";
+      return;
+    }
+    auto dir = path.substr(0, at);
+    auto leaf = utf8(path.substr(at + 1));
+    auto previous = modelId;
+    if (!files.useModel(utf8(dir)) || leaf.empty()) {
+      quickNotice = L"这个位置读不了呢";
+      if (!previous.empty())
+        switchModel(previous, false);
+      return;
+    }
+    auto descriptor = files.modelAsset(leaf, 2 * 1024 * 1024);
+    if (descriptor.empty()) {
+      quickNotice = L"读不到 model3.json";
+      switchModel(previous, false);
+      return;
+    }
+    std::string text(descriptor.begin(), descriptor.end());
+    nlohmann::json man;
+    try {
+      man = nlohmann::json::parse(text);
+    } catch (...) {
+      quickNotice = L"这份描述读不懂呢";
+      switchModel(previous, false);
+      return;
+    }
+    auto moc = man.value("FileReferences", nlohmann::json::object()).value("Moc", std::string());
+    if (moc.empty()) {
+      quickNotice = L"缺少 .moc3";
+      switchModel(previous, false);
+      return;
+    }
+    auto adapterText = files.modelHas("model_adapter.json")
+                           ? std::string([&] {
+                               auto b = files.modelAsset("model_adapter.json", 64 * 1024);
+                               return std::string(b.begin(), b.end());
+                             }())
+                           : std::string("{}");
+    auto reader = [&](std::string_view rel) -> std::optional<std::string> {
+      auto b = files.modelAsset(rel, 2 * 1024 * 1024);
+      if (b.empty())
+        return std::nullopt;
+      return std::string(b.begin(), b.end());
+    };
+    auto report = inspectModel(reader, leaf, adapterText, files.setting(L"intent_mapping.json"));
+    if (!report.missingFiles.empty()) {
+      std::wstring missing;
+      for (size_t i = 0; i < report.missingFiles.size() && i < 3; ++i)
+        missing += (i ? L"、" : L"") + wide(report.missingFiles[i]);
+      quickNotice = L"缺少 " + missing;
+      switchModel(previous, false);
+      return;
+    }
+    ModelEntry e;
+    e.id = leaf;
+    for (auto &c : e.id)
+      if (!(c >= 'a' && c <= 'z') && !(c >= '0' && c <= '9') && c != '-')
+        c = '_';
+    e.name = leaf;
+    for (size_t n = 2;; ++n) {
+      bool clash = std::any_of(models.begin(), models.end(), [&](const ModelEntry &m) { return m.id == e.id; });
+      if (!clash)
+        break;
+      e.id = leaf + "-" + std::to_string(n);
+    }
+    e.dir = utf8(dir);
+    e.manifest = leaf;
+    e.moc = moc;
+    auto mocBytes = files.modelAsset(moc, 8 * 1024 * 1024);
+    if (mocBytes.empty()) {
+      quickNotice = L"缺少 " + wide(moc);
+      switchModel(previous, false);
+      return;
+    }
+    e.sha = sha256({(char *)mocBytes.data(), mocBytes.size()});
+    e.builtin = false;
+    e.adapter = parseAdapter(adapterText).value_or(ModelAdapter{});
+    models.push_back(e);
+    if (!files.note(Note::models, entryLine(e))) {
+      models.pop_back();
+      quickNotice = L"记不住这个模型呢";
+      switchModel(previous, false);
+      return;
+    }
+    if (switchModel(e.id)) {
+      quickNotice = L"接上了 " + wide(e.name) + L"（" + std::to_wstring(report.channels) + L" 个通道）";
+      files.note(Note::models, "{\"kind\":\"active\",\"id\":\"" + e.id + "\"}");
+    }
+  }
+  void consent() {
+    if (askedRecycle || !limits.recycle)
+      return;
+    // Never a modal dialog: the desktop pet must not steal focus, and an automated probe would hang on
+    // it. A one-time bubble points at the right-click switch; until it is on we keep metadata only.
+    askedRecycle = true;
+    s.talk(L"想让我把吃过的那一份放进回收站吗？右键 →“投喂后把小点心移到回收站”", 7000);
+  }
+  bool validDrop(const std::wstring &path) const {
+    auto dot = path.rfind(L'.');
+    if (dot == std::wstring::npos)
+      return false;
+    auto ext = path.substr(dot);
+    std::wstring low = ext;
+    for (auto &c : low)
+      c = wchar_t(towlower(c));
+    if (low == L".json" && path.size() > 7 && path.compare(path.size() - 12, 12, L".model3.json") == 0)
+      return true;
+    static const wchar_t *foods[] = {L".txt", L".png", L".cpp", L".json"};
+    for (auto f : foods)
+      if (low == f)
+        return true;
+    return false;
+  }
   void feed(const std::wstring &p) {
     if (inFeed)
       return;
     inFeed = true;
     auto f = inspectFood(p);
-    auto r = f ? life.feed(f->hash, f->type, wallTime()) : FoodResult::no;
+    if (!f) {
+      s.food(FoodResult::no);
+      inFeed = false;
+      frame();
+      reschedule(33);
+      return;
+    }
+    if (feedVerdict(f->size, limits) == FeedVerdict::tooBig) {
+      // The size attribute is all we looked at; the file is never opened.
+      s.food(FoodResult::heavy);
+      inFeed = false;
+      frame();
+      reschedule(33);
+      return;
+    }
+    auto r = life.feed(f->hash, f->type, wallTime());
     s.food(r);
-    frame();
+    if ((r == FoodResult::fresh || r == FoodResult::again) && limits.recycle) {
+      consent();
+      if (recycleConsent) {
+        auto stamped = files.recycle(f->path);
+        if (stamped.empty())
+          s.talk(wide(limits.failedLine), 3200); // metadata-only fallback, the file stays put
+        else
+          files.note(Note::models, "{\"kind\":\"recycled\",\"name\":\"" + stamped + "\"}");
+      }
+    }
     inFeed = false;
+    frame();
     reschedule(33);
+  }
+  void payload(const std::vector<std::wstring> &list, V at) {
+    if (paused() || !view)
+      return;
+    if (list.empty()) {
+      s.food(FoodResult::no);
+      s.talk(L"这个看不懂呢…", 2600);
+      frame();
+      return;
+    }
+    const auto &first = list.front();
+    bool model = first.size() > 12 && first.compare(first.size() - 12, 12, L".model3.json") == 0;
+    if (model) {
+      importModel(first);
+      if (!quickNotice.empty()) {
+        s.talk(quickNotice, 4000);
+        quickNotice.clear();
+      }
+      frame();
+      return;
+    }
+    if (list.size() > 1) {
+      s.food(FoodResult::no);
+      s.talk(L"一次只能吃一份哦", 2600);
+      frame();
+      return;
+    }
+    if (!validDrop(first)) {
+      s.food(FoodResult::no);
+      s.talk(L"这个看不懂呢…", 2600);
+      frame();
+      return;
+    }
+    (void)at;
+    feed(first);
+  }
+  void textDrop(std::wstring) {
+    // Unknown text/URL payload: a single confused shake, nothing is parsed or stored.
+    s.food(FoodResult::no);
+    s.talk(L"这个看不懂呢…", 2600);
+    frame();
+  }
+  void installDrop() {
+    if (dropTarget || !hwnd)
+      return;
+    DropHooks h;
+    h.cursor = [] { auto c = cursor(); return POINT{LONG(std::lround(c.x)), LONG(std::lround(c.y))}; };
+    h.overActor = [this](POINT p) { return view && onHit({double(p.x), double(p.y)}); };
+    h.validFile = [this](const std::wstring &path) { return validDrop(path); };
+    h.hover = [this](bool valid, POINT) {
+      if (view)
+        view->dragHint(true, valid, cursor());
+      frame();
+    };
+    h.leave = [this] {
+      if (view)
+        view->dragHint(false, false, {});
+      frame();
+    };
+    h.files = [this](std::vector<std::wstring> list, POINT p) { payload(list, {double(p.x), double(p.y)}); };
+    h.text = [this](std::wstring t, POINT) { textDrop(std::move(t)); };
+    dropTarget = makeDropTarget(std::move(h));
+    if (dropTarget)
+      RegisterDragDrop(hwnd, dropTarget);
   }
   bool onHit(V p) const {
     return ellipse(p - s.walk.pos, s.scale, life.s.satiety == 0);
-  }
-  void drop(HDROP drop) {
-    POINT loc{};
-    BOOL client = DragQueryPoint(drop, &loc);
-    ClientToScreen(hwnd, &loc);
-    auto n = DragQueryFileW(drop, 0xffffffff, nullptr, 0);
-    std::wstring path;
-    if (client && onHit({double(loc.x), double(loc.y)}) && n == 1) {
-      auto len = DragQueryFileW(drop, 0, nullptr, 0);
-      if (len > 0 && len <= 32760) {
-        path.resize(len + 1);
-        DragQueryFileW(drop, 0, path.data(), len + 1);
-        path.resize(len);
-      }
-    }
-    DragFinish(drop);
-    if (!client || !onHit({double(loc.x), double(loc.y)}))
-      return;
-    if (path.empty())
-      s.food(FoodResult::no);
-    else
-      feed(path);
   }
   void toggle() {
     s.mute = !s.mute;
@@ -484,6 +824,17 @@ struct App {
       add(3, L"聊聊天吧", s.mode == Mode::chat ? MF_CHECKED : 0);
       add(4, L"自由散步", s.mode == Mode::free ? MF_CHECKED : 0);
       sep();
+      sep();
+      if (!models.empty()) {
+        HMENU sub = CreatePopupMenu();
+        for (size_t i = 0; i < models.size() && i < 24; ++i)
+          AppendMenuW(sub, MF_STRING | (models[i].id == modelId ? MF_CHECKED : 0), UINT_PTR(200 + i),
+                      wide(models[i].name).c_str());
+        AppendMenuW(sub, MF_SEPARATOR, 0, nullptr);
+        AppendMenuW(sub, MF_STRING, 299, L"导入模型…");
+        AppendMenuW(m, MF_POPUP, UINT_PTR(sub), L"模型");
+      }
+      add(9, L"投喂后把小点心移到回收站", recycleConsent ? MF_CHECKED : 0);
       add(5, L"静音  Ctrl+Shift+M", s.mute ? MF_CHECKED : 0);
       add(6, L"回到桌边  Esc");
       if (s.opt.luogu)
@@ -510,9 +861,39 @@ struct App {
       s.talk(L"记忆里的 ." + wide(types[id - 100]) + L"，尝一小口。", 3000);
     } else if (id >= 12 && id <= 14 && bench)
       bench->show(id == 12 ? Page::home : id == 13 ? Page::doodle : Page::memories);
-    else if (id == 15)
+    else if (id >= 200 && id < 200 + int(models.size())) {
+      switchModel(models[id - 200].id);
+    } else if (id == 299) {
+      modal = true;
+      auto picked = pickModel(hwnd);
+      modal = false;
+      if (!picked.empty())
+        importModel(picked);
+      if (!quickNotice.empty()) {
+        s.talk(quickNotice, 4000);
+        quickNotice.clear();
+      }
+    } else if (id >= 200 && id < 200 + int(models.size())) {
+      switchModel(models[id - 200].id);
+    } else if (id == 299) {
+      modal = true;
+      auto picked = pickModel(hwnd);
+      modal = false;
+      if (!picked.empty())
+        importModel(picked);
+      if (!quickNotice.empty()) {
+        s.talk(quickNotice, 4000);
+        quickNotice.clear();
+      }
+    } else if (id == 15)
       pure();
-    else if (id == 11)
+    else if (id == 9) {
+      recycleConsent = !recycleConsent;
+      askedRecycle = true;
+      files.note(Note::models, std::string("{\"kind\":\"consent\",\"recycle\":") +
+                                   (recycleConsent ? "true}" : "false}"));
+      s.talk(recycleConsent ? L"好呀，我会把吃过的那一份轻轻放进回收站。" : L"那我只记住名字和大小。", 3200);
+    } else if (id == 11)
       menu(true);
     else if (id == 2)
       s.setMode(s.mode == Mode::work ? Mode::free : Mode::work);
@@ -547,6 +928,11 @@ struct App {
       UnregisterHotKey(hwnd, i);
     s.opt.input = s.opt.luogu = false;
     sensors();
+    if (dropTarget) {
+      RevokeDragDrop(hwnd);
+      dropTarget->Release();
+      dropTarget = nullptr;
+    }
     bench.reset();
     view.reset();
   }
@@ -561,9 +947,6 @@ struct App {
     case WM_TIMER:
       if (wp == 1)
         onTimer();
-      return 0;
-    case WM_DROPFILES:
-      drop(reinterpret_cast<HDROP>(wp));
       return 0;
     case WM_LBUTTONDOWN: {
       auto p = cursor();

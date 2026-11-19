@@ -1,3 +1,13 @@
+# 2.0.0-preview.3
+
+* 投喂回收站：明确同意后，用 `IFileOperation` 把那一份放进系统回收站并保留 `时间_原文件名`；
+  失败退回纯元数据并提示「没力气搬动呢…」。
+* 大文件拒食：`config/feed_limits.json` 默认 50 MiB，只看大小属性，超限时动画 +「这个太重了吃不下…」。
+* 气泡自适应：按监视器 work area 预排版，多显示器 / 负坐标 / 高 DPI 完整可见。
+* 模型库：内置 Haru/Hiyori/Mao/Mark/Natori/Rice 六套官方示例与各自 `model_adapter.json`，
+  右键「模型」实时切换；导入 `*.model3.json` 时逐项校验并点名缺失文件。
+* 统一 OLE 落点与主题化拖拽反馈（高亮环 / 遮罩 + 禁止符），取消时 RAII 复位。
+
 ## Haru 桌边 · 2.0 本地测试版（preview.2）
 
 真实 **Haru**（Live2D Cubism Native Samples `4-r.7`，`bd14cff`）在 Windows 桌面上透明站立，模型原始 `LICENSE`、`readme.txt` 与全部资源逐字节保留。自带 MIT 授权的 **Purism Core** 直接在进程中解算 `.moc3` 网格，因此不用另行下载 Live2D 专有 Core；也可用获授权的官方 Core 本地重建。

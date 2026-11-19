@@ -1,0 +1,89 @@
+{
+ "schema": 1,
+ "models": [
+  {
+   "id": "haru",
+   "name": "Haru",
+   "dir": "assets/models/haru",
+   "manifest": "Haru.model3.json",
+   "moc": "Haru.moc3",
+   "sha256": "aa59f7a3dc3b30b23b5f10afd9192ed755e4d01dc9a12442d99b972a418e2543",
+   "license": "assets/models/haru/LICENSE",
+   "builtin": true,
+   "adapter": {
+    "cloth_part": "Part01Body001",
+    "expressions": {}
+   }
+  },
+  {
+   "id": "hiyori",
+   "name": "Hiyori",
+   "dir": "assets/models/builtin/hiyori",
+   "manifest": "Hiyori.model3.json",
+   "moc": "Hiyori.moc3",
+   "sha256": "0323f5f377b9afef54318be09e9b4eea2a8cb266190ff9d2f843f95ecb77716c",
+   "license": "assets/models/builtin/hiyori/LICENSE.md",
+   "builtin": true,
+   "adapter": {
+    "cloth_part": "",
+    "expressions": {}
+   }
+  },
+  {
+   "id": "mao",
+   "name": "Mao",
+   "dir": "assets/models/builtin/mao",
+   "manifest": "Mao.model3.json",
+   "moc": "Mao.moc3",
+   "sha256": "a9c7010c42ed2cee71c07c62214adde8773ea7b7928e298388972ed00a1d3e23",
+   "license": "assets/models/builtin/mao/LICENSE.md",
+   "builtin": true,
+   "adapter": {
+    "cloth_part": "",
+    "expressions": {}
+   }
+  },
+  {
+   "id": "mark",
+   "name": "Mark",
+   "dir": "assets/models/builtin/mark",
+   "manifest": "Mark.model3.json",
+   "moc": "Mark.moc3",
+   "sha256": "f6351429bd3dd655ac95d1027e463ae415e99e2b1b43431a9662fcd316373e9e",
+   "license": "assets/models/builtin/mark/LICENSE.md",
+   "builtin": true,
+   "adapter": {
+    "cloth_part": "",
+    "expressions": {}
+   }
+  },
+  {
+   "id": "natori",
+   "name": "Natori",
+   "dir": "assets/models/builtin/natori",
+   "manifest": "Natori.model3.json",
+   "moc": "Natori.moc3",
+   "sha256": "8f3122e2d3b5a30f79d95078ac756e45ea5df740f3e72f461cdec793303bf94f",
+   "license": "assets/models/builtin/natori/LICENSE.md",
+   "builtin": true,
+   "adapter": {
+    "cloth_part": "",
+    "expressions": {}
+   }
+  },
+  {
+   "id": "rice",
+   "name": "Rice",
+   "dir": "assets/models/builtin/rice",
+   "manifest": "Rice.model3.json",
+   "moc": "Rice.moc3",
+   "sha256": "be56f2d656d279d8db9fe302ec744fa5992ff884b2ebb233f202772d5dd7e4dc",
+   "license": "assets/models/builtin/rice/LICENSE.md",
+   "builtin": true,
+   "adapter": {
+    "cloth_part": "",
+    "expressions": {}
+   }
+  }
+ ]
+}

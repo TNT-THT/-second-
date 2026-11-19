@@ -51,7 +51,11 @@ bool png(const std::vector<uint8_t> &bytes, Texture &tex, size_t &budget) {
       out->CopyPixels(nullptr, 4 * w, UINT(4 * w * h), reinterpret_cast<BYTE *>(tex.rgba.data())));
 }
 } // namespace
-bool Model::load(Vault &v) {
+bool Model::load(Vault &v, const ModelEntry &entry) {
+  if (!v.useModel(entry.dir))
+    return false;
+  mocName = entry.moc;
+  pin = entry.sha;
   ModelResources r;
   r.original = [&](std::string_view path, size_t cap) { return v.modelAsset(path, cap); };
   r.texture = [&](std::string_view path, Texture &t, size_t &budget) {
@@ -59,11 +63,14 @@ bool Model::load(Vault &v) {
   };
   r.tracks = v.asset(L"haru-motion.lut", 2 * 1024 * 1024);
   r.mapping = v.setting(L"intent_mapping.json");
+  r.manifest = entry.manifest;
+  r.pin = entry.sha;
+  r.clothPart = entry.adapter.clothPart;
   return actor.load(r);
 }
 bool Model::verify(Vault &v) {
-  auto bytes = v.modelAsset("Haru.moc3", 1024 * 1024);
-  bool ok = actor.intact() && !bytes.empty() && sha256({(char *)bytes.data(), bytes.size()}) == haruSha;
+  auto bytes = v.modelAsset(mocName, 1024 * 1024);
+  bool ok = actor.intact() && !bytes.empty() && sha256({(char *)bytes.data(), bytes.size()}) == pin;
   if (!ok)
     actor.discard();
   return ok;
